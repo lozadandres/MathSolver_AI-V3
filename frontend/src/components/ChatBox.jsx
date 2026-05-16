@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -7,9 +8,17 @@ import 'katex/dist/katex.min.css';
 import GraphComponent from './GraphComponent';
 import html2pdf from 'html2pdf.js';
 import MathCanvas from './MathCanvas';
+import { useAuth } from '../context/AuthContext';
+import api from '../api/axios';
 import '../styles/ChatBox.css';
+import bot from '/public/avatars/bot.gif';
+import useravatar from '/public/avatars/user.png';
 
 const ChatBox = () => {
+  const { user, logout, theme, toggleTheme } = useAuth();
+  const navigate = useNavigate();
+  const { groupId } = useParams();
+  const [groupInfo, setGroupInfo] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('detallado');
@@ -22,6 +31,8 @@ const ChatBox = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showDesmos, setShowDesmos] = useState(false);
   const [desmosExpr, setDesmosExpr] = useState("");
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -62,6 +73,35 @@ const ChatBox = () => {
   const openDesmos = (expr) => {
     setDesmosExpr(expr);
     setShowDesmos(true);
+  };
+
+  const handleJoinClass = async () => {
+    try {
+        const res = await api.post('/estudiante/unirse', { codigo: joinCode });
+        alert(res.data.message);
+        setShowJoinModal(false);
+        setJoinCode('');
+    } catch (e) {
+        alert(e.response?.data?.error || "Error al unirse a la clase");
+    }
+  };
+
+  useEffect(() => {
+    if (groupId) {
+      cargarContextoGrupo();
+    } else {
+      setGroupInfo(null);
+    }
+  }, [groupId]);
+
+  const cargarContextoGrupo = async () => {
+    try {
+      const res = await api.get(`/chat/context/${groupId}`);
+      setGroupInfo(res.data);
+      // No agregamos mensaje a setMessages para que se muestre el Welcome Screen limpio
+    } catch (error) {
+      console.error("Error cargando contexto:", error);
+    }
   };
 
   useEffect(() => {
@@ -118,7 +158,7 @@ const ChatBox = () => {
     setIsLoading(true);
 
     try {
-      let response;
+      let data;
       
       // Si hay archivo, usar FormData
       if (fileToSend) {
@@ -127,36 +167,30 @@ const ChatBox = () => {
         formData.append('mode', mode);
         formData.append('lang', language);
         formData.append('file', fileToSend);
+        if (groupId) formData.append('groupId', groupId);
         
-        response = await fetch('http://localhost:3000/api/chat-with-file', {
-          method: 'POST',
-          body: formData,
+        const res = await api.post('/chat/with-file', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
         });
+        data = res.data;
       } else {
         // Sin archivo, usar JSON
-        response = await fetch('http://localhost:3000/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ message: messageText, mode: mode, lang: language }),
+        const res = await api.post('/chat', { 
+          message: messageText, 
+          mode: mode, 
+          lang: language,
+          groupId: groupId 
         });
+        data = res.data;
       }
 
-      if (!response.ok) {
-        throw new Error('Error en la comunicación con el servidor');
-      }
-
-      // Procesar respuesta
-      const data = await response.json();
-      
       // Agregar respuesta del asistente al chat
       const botMessage = { type: 'bot', content: normalizeResponse(data) };
       setMessages(prevMessages => [...prevMessages, botMessage]);
     } catch (error) {
       console.error('Error:', error);
       // Mostrar mensaje de error en el chat
-      const errorMessage = { type: 'bot', content: `⚠️ Error de conexión: ${error.message}` };
+      const errorMessage = { type: 'bot', content: `⚠️ Error de conexión: ${error.response?.data?.error || error.message}` };
       setMessages(prevMessages => [...prevMessages, errorMessage]);
     } finally {
       setIsLoading(false);
@@ -244,19 +278,17 @@ const ChatBox = () => {
       formData.append('mode', mode);
       formData.append('lang', language);
       formData.append('file', file);
+      if (groupId) formData.append('groupId', groupId);
       
-      const response = await fetch('http://localhost:3000/api/chat-with-file', {
-        method: 'POST',
-        body: formData,
+      const res = await api.post('/chat/with-file', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
-
-      if (!response.ok) throw new Error('Error en el servidor');
-      const data = await response.json();
-      const botMessage = { type: 'bot', content: normalizeResponse(data) };
+      
+      const botMessage = { type: 'bot', content: normalizeResponse(res.data) };
       setMessages(prevMessages => [...prevMessages, botMessage]);
     } catch (error) {
       console.error('Error:', error);
-      const errorMessage = { type: 'bot', content: `⚠️ Error al procesar el dibujo: ${error.message}` };
+      const errorMessage = { type: 'bot', content: `⚠️ Error al procesar el dibujo: ${error.response?.data?.error || error.message}` };
       setMessages(prevMessages => [...prevMessages, errorMessage]);
     } finally {
       setIsLoading(false);
@@ -462,7 +494,17 @@ const ChatBox = () => {
 
       <aside className={`chat-sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
-          <h2>MathSolver AI</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <h2 style={{ margin: 0 }}>MathSolver AI</h2>
+            <button 
+              onClick={() => navigate('/dashboard')} 
+              className="action-btn"
+              style={{ padding: '4px 8px', fontSize: '0.7rem' }}
+            >
+              Volver
+            </button>
+          </div>
+          {groupInfo && <div className="group-badge">{groupInfo.nombre}</div>}
         </div>
         <div className="sidebar-content">
           <div className="history-section">
@@ -514,11 +556,57 @@ const ChatBox = () => {
               </button>
             </div>
           </div>
+          
+          {(!user?.role || user?.role === 'Estudiante') && (
+            <div className="sidebar-section">
+                <button 
+                    onClick={() => setShowJoinModal(true)}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                    + Unirse a una Clase
+                </button>
+            </div>
+          )}
+          {user?.role === 'Estudiante' && (
+            <div className="sidebar-section" style={{ marginTop: '-0.5rem', marginBottom: '1rem' }}>
+              <button 
+                onClick={() => navigate('/dashboard')}
+                className="new-chat-btn"
+                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+              >
+                📊 Ver mi Panel / Grupos
+              </button>
+            </div>
+          )}
         </div>
-        <div className="sidebar-footer">
-          <div className="user-profile">
-            <span className="user-avatar">👤</span>
-            <span className="user-name">Usuario</span>
+        <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span className="user-avatar" style={{ background: 'rgba(99, 102, 241, 0.2)', padding: '0.4rem', borderRadius: '50%' }}><img src={useravatar} alt="User" className="user-avatar" /></span>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span className="user-name" style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'white' }}>{user?.email?.split('@')[0] || 'Usuario'}</span>
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Rol: {user?.role || 'Estudiante'}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <button 
+                onClick={toggleTheme}
+                style={{
+                    flex: 1, padding: '0.5rem', background: 'var(--glass-bg)', color: 'var(--text-main)', border: '1px solid var(--glass-border)', borderRadius: '8px', cursor: 'pointer', fontSize: '1.2rem', display: 'flex', justifyContent: 'center', alignItems: 'center', transition: 'all 0.2s'
+                }}
+                title={theme === 'dark' ? 'Cambiar a Tema Claro' : 'Cambiar a Tema Oscuro'}
+              >
+                {theme === 'dark' ? '☀️' : '🌙'}
+              </button>
+              <button 
+                onClick={logout} 
+                style={{
+                    flex: 3, padding: '0.5rem', background: 'var(--danger-bg)', color: 'var(--danger-color)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500', transition: 'all 0.2s', display: 'flex', justifyContent: 'center', alignItems: 'center'
+                }}
+                onMouseOver={(e) => e.target.style.background = 'rgba(239, 68, 68, 0.2)'}
+                onMouseOut={(e) => e.target.style.background = 'var(--danger-bg)'}
+              >
+                Cerrar Sesión
+              </button>
           </div>
         </div>
       </aside>
@@ -532,28 +620,52 @@ const ChatBox = () => {
           >
             ☰
           </button>
-          <h2>MathSolver AI</h2>
+          <h2>{groupInfo ? `Chat: ${groupInfo.nombre}` : 'MathSolver AI'}</h2>
         </div>
         
         <div className="messages-container">
           {messages.length === 0 ? (
             <div className="welcome-screen">
               <div className="welcome-card">
-                <h1>¿En qué puedo ayudarte hoy?</h1>
-                <p>MathSolver AI utiliza inteligencia artificial para brindarte soluciones precisas y detalladas.</p>
+                <h1>{groupInfo ? `¡Hola! Estás en el chat de ${groupInfo.nombre}` : '¿En qué puedo ayudarte hoy?'}</h1>
+                <p>
+                  {groupInfo 
+                    ? `Soy tu tutor IA para esta clase. ${groupInfo.descripcion || 'Pregúntame lo que necesites sobre los temas que están viendo.'}`
+                    : 'MathSolver AI utiliza inteligencia artificial para brindarte soluciones precisas y detalladas.'}
+                </p>
+                
                 <div className="suggestion-grid">
-                  <button onClick={() => setInput('¿Cómo resolver ecuaciones y problemas matemáticos?')}>
-                    Resolver ecuaciones y problemas
-                  </button>
-                  <button onClick={() => setInput('¿Puedes explicarme conceptos de álgebra, cálculo y geometría?')}>
-                    Explicar conceptos matemáticos
-                  </button>
-                  <button onClick={() => setInput('¿Me puedes dar un ejemplo paso a paso?')}>
-                    Ejemplos paso a paso
-                  </button>
-                  <button onClick={() => setInput('¿Puedes explicarme teoremas y fórmulas matemáticas?')}>
-                    Teoremas y fórmulas
-                  </button>
+                  {groupInfo?.nombre?.toLowerCase().includes('cienc') ? (
+                    <>
+                      <button onClick={() => setInput('¿Puedes explicarme el método científico?')}>
+                        Explicar método científico
+                      </button>
+                      <button onClick={() => setInput('¿Cómo funciona la fotosíntesis?')}>
+                        Fotosíntesis paso a paso
+                      </button>
+                      <button onClick={() => setInput('Explícame las leyes de la termodinámica')}>
+                        Leyes de termodinámica
+                      </button>
+                      <button onClick={() => setInput('¿Qué es un ecosistema y cómo se equilibra?')}>
+                        Concepto de Ecosistema
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => setInput('¿Cómo resolver ecuaciones y problemas matemáticos?')}>
+                        Resolver ecuaciones y problemas
+                      </button>
+                      <button onClick={() => setInput('¿Puedes explicarme conceptos de álgebra, cálculo y geometría?')}>
+                        Explicar conceptos matemáticos
+                      </button>
+                      <button onClick={() => setInput('¿Me puedes dar un ejemplo paso a paso?')}>
+                        Ejemplos paso a paso
+                      </button>
+                      <button onClick={() => setInput('¿Puedes explicarme teoremas y fórmulas matemáticas?')}>
+                        Teoremas y fórmulas
+                      </button>
+                    </>
+                  )}
                 </div>
                 <div className="whiteboard-promotion">
                   <button className="promo-canvas-btn" onClick={() => setIsCanvasOpen(true)}>
@@ -567,7 +679,7 @@ const ChatBox = () => {
               {messages.map((msg, index) => (
                 <div key={index} className={`message-wrapper ${msg.type}`}>
                   <div className="message-icon">
-                    {msg.type === 'user' ? '👤' : '🤖'}
+                    {msg.type === 'user' ? <img src={useravatar} alt="User" className="user-avatar" /> : <img src={bot} alt="Bot" className="bot-avatar" />}
                   </div>
                     <div className="message-bubble" id={`message-${index}`}>
                       <ReactMarkdown 
@@ -615,7 +727,7 @@ const ChatBox = () => {
               ))}
               {isLoading && (
                 <div className="message-wrapper bot">
-                  <div className="message-icon">🤖</div>
+                  <div className="message-icon"><img src={bot} alt="Bot" className="bot-avatar" /></div>
                   <div className="message-bubble loading">
                     <div className="typing-indicator">
                       <span></span>
@@ -738,6 +850,26 @@ const ChatBox = () => {
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {showJoinModal && (
+        <div className="desmos-modal-overlay" onClick={() => setShowJoinModal(false)}>
+            <div className="desmos-modal-content" style={{ maxWidth: '400px', height: 'auto', padding: '2rem' }} onClick={e => e.stopPropagation()}>
+                <h3 style={{ marginTop: 0 }}>Unirse a una Clase</h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Ingresa el código de invitación proporcionado por tu profesor.</p>
+                <input 
+                    type="text" 
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                    placeholder="Ej: A1B2C3D4"
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', color: 'var(--text-main)', border: '1px solid var(--btn-border)', borderRadius: '8px', marginBottom: '1rem', textTransform: 'uppercase', boxSizing: 'border-box' }}
+                />
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button onClick={() => setShowJoinModal(false)} style={{ flex: 1, padding: '0.75rem', background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--btn-border)', borderRadius: '8px', cursor: 'pointer' }}>Cancelar</button>
+                    <button onClick={handleJoinClass} style={{ flex: 1, padding: '0.75rem', background: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Unirse</button>
+                </div>
+            </div>
         </div>
       )}
     </div>
