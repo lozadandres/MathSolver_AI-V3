@@ -15,9 +15,11 @@ import bot from '/public/avatars/bot.gif';
 import useravatar from '/public/avatars/user.png';
 
 const ChatBox = () => {
-  const { user, logout, theme, toggleTheme } = useAuth();
+  const { user, logout, theme, toggleTheme, hasPermission } = useAuth();
   const navigate = useNavigate();
   const { groupId } = useParams();
+  const canUseChat = hasPermission('CHAT_IA');
+  const canJoinClasses = hasPermission('CLASES_UNIRSE');
   const [groupInfo, setGroupInfo] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -485,6 +487,19 @@ const ChatBox = () => {
 
 
 
+  if (!canUseChat) {
+    return (
+      <div className="chat-container">
+        <div className="chat-main">
+          <div className="empty-state">
+            <h2>Chat no disponible</h2>
+            <p>Tu perfil no tiene activo el permiso CHAT_IA.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-layout">
       {/* Overlay para cerrar sidebar en móvil */}
@@ -557,7 +572,7 @@ const ChatBox = () => {
             </div>
           </div>
           
-          {(!user?.role || user?.role === 'Estudiante') && (
+          {canJoinClasses && (!user?.role || user?.role === 'Estudiante') && (
             <div className="sidebar-section">
                 <button 
                     onClick={() => setShowJoinModal(true)}

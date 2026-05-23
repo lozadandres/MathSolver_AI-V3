@@ -1,9 +1,11 @@
 import express from 'express';
 import multer from 'multer';
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { Grupo, Usuario, RelacionRecurso } from '../models/index.js';
-import { requireAuth } from '../middleware/authMiddleware.js';
+import { Grupo, Usuario } from '../models/index.js';
+import { requireAuth, requirePermission, requireGroupAccess } from '../middleware/authMiddleware.js';
+import { checkPolicy } from '../middleware/policyMiddleware.js';
 import { GroupDTO } from '../dtos/index.js';
+import { logActionInfo } from '../utils/actionLogger.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -107,7 +109,7 @@ async function obtenerRespuestaContextual(pregunta, modo = 'detallado', imageDat
 }
 
 // Endpoint para obtener contexto del grupo
-router.get('/context/:groupId', requireAuth, async (req, res) => {
+router.get('/context/:groupId', requireAuth, requirePermission('CHAT_IA'), checkPolicy('clase_debe_estar_activa'), requireGroupAccess((req) => req.params.groupId), checkPolicy('horario_chat_estudiante'), async (req, res) => {
     try {
         const { groupId } = req.params;
         const grupo = await Grupo.findByPk(groupId, {
@@ -126,7 +128,7 @@ router.get('/context/:groupId', requireAuth, async (req, res) => {
 });
 
 // Endpoint principal de chat (JSON)
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, requirePermission('CHAT_IA'), checkPolicy('clase_debe_estar_activa'), requireGroupAccess((req) => req.body.groupId), checkPolicy('horario_chat_estudiante'), async (req, res) => {
     try {
         const { message, mode, lang, groupId } = req.body;
         let context = "Este es un chat general.";
@@ -141,6 +143,19 @@ router.post('/', requireAuth, async (req, res) => {
         }
 
         const respuesta = await obtenerRespuestaContextual(message, mode, null, lang, context, subject);
+        await logActionInfo(req, {
+            accion: 'AI_QUERY',
+            seccion: 'IA',
+            descripcion: `Consulta IA en ${groupId ? `clase ${groupId}` : 'chat general'}`,
+            metadata: {
+                pregunta: message,
+                modo: mode,
+                idioma: lang,
+                id_grupo: groupId || null,
+                clase: subject,
+                con_archivo: false
+            }
+        });
         res.json(respuesta);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -148,7 +163,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // Endpoint de chat con archivos (Multipart)
-router.post('/with-file', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/with-file', requireAuth, requirePermission('CHAT_IA'), upload.single('file'), checkPolicy('clase_debe_estar_activa'), requireGroupAccess((req) => req.body.groupId), checkPolicy('horario_chat_estudiante'), async (req, res) => {
     try {
         const { message, mode, lang, groupId } = req.body;
         let imageData = null;
@@ -171,6 +186,20 @@ router.post('/with-file', requireAuth, upload.single('file'), async (req, res) =
         }
 
         const respuesta = await obtenerRespuestaContextual(message, mode, imageData, lang, context, subject);
+        await logActionInfo(req, {
+            accion: 'AI_QUERY',
+            seccion: 'IA',
+            descripcion: `Consulta IA con archivo en ${groupId ? `clase ${groupId}` : 'chat general'}`,
+            metadata: {
+                pregunta: message,
+                modo: mode,
+                idioma: lang,
+                id_grupo: groupId || null,
+                clase: subject,
+                con_archivo: !!req.file,
+                archivo: req.file ? { nombre: req.file.originalname, mime_type: req.file.mimetype, size: req.file.size } : null
+            }
+        });
         res.json(respuesta);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -221,7 +250,7 @@ async function procesarDibujoInteligente(imageData) {
 }
 
 // Nueva ruta para el modo inteligente de la pizarra
-router.post('/beautify', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/beautify', requireAuth, requirePermission('CHAT_IA'), upload.single('file'), checkPolicy('horario_chat_estudiante'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No file provided" });
         

@@ -1,8 +1,8 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const ProtectedRoute = ({ children, allowedRoles }) => {
-    const { isAuthenticated, isLoading, user } = useAuth();
+const ProtectedRoute = ({ children, allowedRoles, requiredPermission }) => {
+    const { isAuthenticated, isLoading, user, hasPermission } = useAuth();
 
     if (isLoading) {
         return (
@@ -18,6 +18,10 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
     // Soporte para ReBAC/RBAC frontend (bloquea si el rol no es admitido)
     if (allowedRoles && !allowedRoles.includes(user?.role)) {
+        return <Navigate to="/unauthorized" replace />;
+    }
+
+    if (requiredPermission && !hasPermission(requiredPermission)) {
         return <Navigate to="/unauthorized" replace />;
     }
 

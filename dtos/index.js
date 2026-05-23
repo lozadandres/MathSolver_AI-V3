@@ -4,6 +4,10 @@
  */
 export const UserDTO = (user) => {
     if (!user) return null;
+    const permissions = user.rol?.permisos
+        ? user.rol.permisos.map((permiso) => permiso.nombre)
+        : (user.permissions || []);
+
     return {
         id: user.id_usuario,
         email: user.email,
@@ -11,7 +15,8 @@ export const UserDTO = (user) => {
         roleId: user.id_rol,
         activo: user.activo,
         bloqueado: user.bloqueado,
-        configuracion: user.configuracion || null
+        configuracion: user.configuracion || null,
+        permissions
     };
 };
 
@@ -23,11 +28,13 @@ export const GroupDTO = (group) => {
     return {
         id: group.id_grupo,
         nombre: group.nombre,
+        materia: group.materia || group.nombre,
         descripcion: group.descripcion,
         activo: group.activo,
         profesor: group.tutor ? {
             email: group.tutor.email
         } : null,
+        roles_en_grupo: group.roles_en_grupo || [],
         integrantes: group.integrantes ? group.integrantes.map(i => ({
             id: i.id_usuario,
             email: i.email

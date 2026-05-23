@@ -58,16 +58,21 @@
 body {
   margin: 0;
   padding: 0;
-  min-width: 100vw;
+  min-width: 320px;
   min-height: 100vh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--bg-gradient);
   color: var(--text-main);
 }
 
 #root {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  min-height: 100vh;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 a {

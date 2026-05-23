@@ -32,6 +32,10 @@ const CodigoInvitacion = sequelize.define('CodigoInvitacion', {
   activo: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  fecha_expiracion: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   tableName: 'Codigos_Invitacion',

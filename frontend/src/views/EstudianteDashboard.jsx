@@ -6,12 +6,15 @@ import { useNavigate } from 'react-router-dom';
 import '../styles/Dashboards.css';
 
 const EstudianteDashboard = () => {
-    const { user, logout, theme, toggleTheme } = useAuth();
+    const { user, logout, theme, toggleTheme, hasPermission } = useAuth();
     const navigate = useNavigate();
     const [grupos, setGrupos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showJoinModal, setShowJoinModal] = useState(false);
     const [joinCode, setJoinCode] = useState('');
+    const canJoinClasses = hasPermission('CLASES_UNIRSE');
+    const canViewClasses = hasPermission('CLASES_VER');
+    const canUseChat = hasPermission('CHAT_IA');
 
     useEffect(() => {
         cargarDatos();
@@ -19,6 +22,11 @@ const EstudianteDashboard = () => {
 
     const cargarDatos = async () => {
         try {
+            if (!canViewClasses) {
+                setGrupos([]);
+                setLoading(false);
+                return;
+            }
             const res = await api.get('/estudiante/grupos');
             setGrupos(res.data);
             setLoading(false);
@@ -66,9 +74,11 @@ const EstudianteDashboard = () => {
                         <h2 className="card-title">
                             <LayoutGrid size={24} color="var(--primary-color)" /> Mis Clases y Grupos
                         </h2>
-                        <button onClick={() => setShowJoinModal(true)} className="action-btn" style={{ background: 'var(--primary-color)', color: 'white', padding: '0.5rem 1.5rem' }}>
-                            <Plus size={18} /> Unirse a Clase
-                        </button>
+                        {canJoinClasses && (
+                            <button onClick={() => setShowJoinModal(true)} className="action-btn" style={{ background: 'var(--primary-color)', color: 'white', padding: '0.5rem 1.5rem' }}>
+                                <Plus size={18} /> Unirse a Clase
+                            </button>
+                        )}
                     </div>
 
                     {loading ? <p>Cargando tus clases...</p> : (
@@ -82,13 +92,15 @@ const EstudianteDashboard = () => {
                                     <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{g.descripcion || 'Sin descripción'}</div>
                                     <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div><strong>Profesor:</strong> {g.profesor?.email || 'N/A'}</div>
-                                        <button 
-                                            onClick={() => navigate(`/chat/${g.id}`)}
-                                            className="action-btn"
-                                            style={{ background: 'var(--primary-color)', color: 'white', padding: '0.4rem 1rem', fontSize: '0.8rem' }}
-                                        >
-                                            Entrar al Chat
-                                        </button>
+                                        {canUseChat && (
+                                            <button
+                                                onClick={() => navigate(`/chat/${g.id}`)}
+                                                className="action-btn"
+                                                style={{ background: 'var(--primary-color)', color: 'white', padding: '0.4rem 1rem', fontSize: '0.8rem' }}
+                                            >
+                                                Entrar al Chat
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -118,7 +130,7 @@ const EstudianteDashboard = () => {
             </div>
 
             {/* Modal Unirse a Clase */}
-            {showJoinModal && (
+            {canJoinClasses && showJoinModal && (
                 <div className="modal-overlay">
                     <div className="modal-content">
                         <div className="card-header">

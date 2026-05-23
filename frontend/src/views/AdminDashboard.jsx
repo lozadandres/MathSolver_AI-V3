@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
-import { Users, Shield, LogOut, Trash2, UserPlus, X, LayoutGrid, Key, Plus } from 'lucide-react';
+import { Users, Shield, LogOut, Trash2, X, LayoutGrid, Key, Plus, FileText, AlertTriangle, Activity, Bot, CheckCircle, Lock, Edit3, BarChart3, PieChart, TrendingUp } from 'lucide-react';
+import ContextRoleBadge from '../components/ContextRoleBadge';
+import ReBACManagementModal from '../components/ReBACManagementModal';
 import '../styles/Dashboards.css';
 
 const AdminDashboard = () => {
@@ -11,16 +13,17 @@ const AdminDashboard = () => {
 
     // Estados para Usuarios
     const [usuarios, setUsuarios] = useState([]);
-    const [showAssignModal, setShowAssignModal] = useState(false);
     const [showUserModal, setShowUserModal] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
     const [userData, setUserData] = useState({ email: '', password: '', id_rol: '' });
-    const [assignmentData, setAssignmentData] = useState({ id_profesor: '', id_estudiante: '' });
 
     // Estados para Grupos
     const [grupos, setGrupos] = useState([]);
     const [showGroupModal, setShowGroupModal] = useState(false);
     const [newGroup, setNewGroup] = useState({ nombre: '', descripcion: '', id_profesor: '' });
+    const [expandedGroupId, setExpandedGroupId] = useState(null);
+    const [groupContextRoles, setGroupContextRoles] = useState({});
+    const [rebacGroup, setRebacGroup] = useState(null);
 
     // Estados para Roles y Permisos
     const [roles, setRoles] = useState([]);
@@ -31,6 +34,14 @@ const AdminDashboard = () => {
     const [showEditRoleModal, setShowEditRoleModal] = useState(false);
     const [editingRole, setEditingRole] = useState(null);
     const [editRoleData, setEditRoleData] = useState({ nombre: '', descripcion: '', id_tipo_rol: '' });
+    const [auditLogs, setAuditLogs] = useState([]);
+    const [actionLogs, setActionLogs] = useState([]);
+    const [sessionLogs, setSessionLogs] = useState([]);
+    const [logStats, setLogStats] = useState({ totalAcciones: 0, accionesFallidas: 0, sesionesActivas: 0, consultasIA: 0 });
+    const [auditFilters, setAuditFilters] = useState({ fecha: 'semana', seccion: '', nivel: '', id_usuario: '', categoria: '', exito: '', accion: '' });
+    const [selectedAuditLog, setSelectedAuditLog] = useState(null);
+    const [selectedUserRoles, setSelectedUserRoles] = useState(null);
+    const [chartTooltip, setChartTooltip] = useState(null);
 
     useEffect(() => {
         cargarTodo();
@@ -39,23 +50,67 @@ const AdminDashboard = () => {
     const cargarTodo = async () => {
         setLoading(true);
         try {
-            const [resUsers, resGroups, resRoles, resPerms, resTipoRoles] = await Promise.all([
+            const [resUsers, resGroups, resRoles, resPerms, resTipoRoles, resAudit, resActions, resSessions, resStats] = await Promise.all([
                 api.get('/admin/usuarios'),
                 api.get('/admin/grupos'),
                 api.get('/admin/roles'),
                 api.get('/admin/permisos'),
-                api.get('/admin/tipo-roles')
+                api.get('/admin/tipo-roles'),
+                api.get('/admin/logs/auditoria').catch(() => ({ data: [] })),
+                api.get('/admin/logs/acciones').catch(() => ({ data: [] })),
+                api.get('/admin/logs/sesiones').catch(() => ({ data: [] })),
+                api.get('/admin/logs/stats').catch(() => ({ data: { totalAcciones: 0, accionesFallidas: 0, sesionesActivas: 0, consultasIA: 0 } }))
             ]);
             setUsuarios(resUsers.data);
             setGrupos(resGroups.data);
             setRoles(resRoles.data);
             setPermisos(resPerms.data);
             setTipoRoles(resTipoRoles.data);
+            setAuditLogs(resAudit.data);
+            setActionLogs(resActions.data);
+            setSessionLogs(resSessions.data);
+            setLogStats(resStats.data);
         } catch (error) {
             console.error("Error cargando datos", error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const cargarAuditoria = async (filters = auditFilters) => {
+        try {
+            const params = new URLSearchParams();
+            Object.entries(filters).forEach(([key, value]) => {
+                if (value) params.append(key, value);
+            });
+            const res = await api.get(`/admin/logs/auditoria?${params.toString()}`);
+            const resActions = await api.get(`/admin/logs/acciones?${params.toString()}`).catch(() => ({ data: [] }));
+            const resSessions = await api.get(`/admin/logs/sesiones?${params.toString()}`).catch(() => ({ data: [] }));
+            const resStats = await api.get('/admin/logs/stats').catch(() => ({ data: logStats }));
+            setAuditLogs(res.data);
+            setActionLogs(resActions.data);
+            setSessionLogs(resSessions.data);
+            setLogStats(resStats.data);
+        } catch (error) {
+            console.error("Error cargando auditoria", error);
+        }
+    };
+
+    const cambiarFiltroAuditoria = (key, value) => {
+        const nextFilters = { ...auditFilters, [key]: value };
+        setAuditFilters(nextFilters);
+        cargarAuditoria(nextFilters);
+    };
+
+    const actionVisual = (log) => {
+        if (log.resultado === 'DENIED' || log.accion?.includes('DENIED')) return { color: '#ef4444', icon: <AlertTriangle size={14} /> };
+        if (log.accion?.includes('DELETE') || log.accion?.includes('REVOKE') || log.accion?.includes('DISABLE')) return { color: '#f97316', icon: <Trash2 size={14} /> };
+        if (log.accion?.includes('CREATE') || log.accion?.includes('JOIN') || log.accion?.includes('SUCCESS')) return { color: '#10b981', icon: <CheckCircle size={14} /> };
+        if (log.seccion === 'IA' || log.accion?.includes('AI')) return { color: '#a78bfa', icon: <Bot size={14} /> };
+        if (log.accion?.includes('LOGIN') || log.accion?.includes('TOKEN')) return { color: '#60a5fa', icon: <Key size={14} /> };
+        if (log.accion?.includes('BLOCK')) return { color: '#ef4444', icon: <Lock size={14} /> };
+        if (log.accion?.includes('UPDATE') || log.accion?.includes('EDIT') || log.accion?.includes('ROLE')) return { color: '#f59e0b', icon: <Edit3 size={14} /> };
+        return { color: 'var(--text-muted)', icon: <Activity size={14} /> };
     };
 
     // --- Acciones de Usuarios ---
@@ -102,15 +157,6 @@ const AdminDashboard = () => {
         setShowUserModal(true);
     };
 
-    const manejarAsignacion = async (e) => {
-        e.preventDefault();
-        try {
-            await api.post('/admin/asignar', assignmentData);
-            setShowAssignModal(false);
-            cargarTodo();
-        } catch (error) { alert(error.response?.data?.error); }
-    };
-
     // --- Acciones de Grupos ---
     const crearGrupo = async (e) => {
         e.preventDefault();
@@ -120,6 +166,65 @@ const AdminDashboard = () => {
             setNewGroup({ nombre: '', descripcion: '', id_profesor: '' });
             cargarTodo();
         } catch (error) { console.error(error); }
+    };
+
+    const cargarRolesContextualesGrupo = async (groupId) => {
+        try {
+            const res = await api.get(`/admin/grupos/${groupId}/roles-contextuales`);
+            setGroupContextRoles(prev => ({ ...prev, [groupId]: res.data }));
+            return res.data;
+        } catch (error) {
+            if (error.response?.status === 401) {
+                alert('Tu sesión expiró. Vuelve a iniciar sesión para gestionar roles ReBAC.');
+                return null;
+            }
+            alert(error.response?.data?.error || 'Error al cargar roles contextuales del grupo');
+            return null;
+        }
+    };
+
+    const toggleGrupoExpandido = async (groupId) => {
+        const nextGroupId = expandedGroupId === groupId ? null : groupId;
+        setExpandedGroupId(nextGroupId);
+        if (nextGroupId && !groupContextRoles[nextGroupId]) {
+            const roles = await cargarRolesContextualesGrupo(nextGroupId);
+            if (!roles) setExpandedGroupId(null);
+        }
+    };
+
+    const abrirGestionReBACAdmin = async (grupo) => {
+        const roles = await cargarRolesContextualesGrupo(grupo.id);
+        if (roles) setRebacGroup(grupo);
+    };
+
+    const asignarRolContextualAdmin = async (roleData) => {
+        try {
+            await api.post(`/admin/grupos/${rebacGroup.id}/roles-contextuales/bulk`, roleData);
+            await cargarRolesContextualesGrupo(rebacGroup.id);
+            cargarTodo();
+        } catch (error) {
+            alert(error.response?.data?.error || 'Error al asignar rol contextual');
+        }
+    };
+
+    const revocarRolContextualAdmin = async (relationId) => {
+        if (!confirm('Revocar este rol contextual?')) return;
+        try {
+            await api.delete(`/admin/grupos/${rebacGroup.id}/roles-contextuales/${relationId}`);
+            await cargarRolesContextualesGrupo(rebacGroup.id);
+            cargarTodo();
+        } catch (error) {
+            alert(error.response?.data?.error || 'Error al revocar rol contextual');
+        }
+    };
+
+    const verRolesUsuario = async (usuario) => {
+        try {
+            const res = await api.get(`/admin/usuarios/${usuario.id}/roles-contextuales`);
+            setSelectedUserRoles({ usuario, roles: res.data });
+        } catch (error) {
+            alert(error.response?.data?.error || 'Error al cargar roles contextuales del usuario');
+        }
     };
 
     // --- Acciones de Permisos ---
@@ -170,7 +275,223 @@ const AdminDashboard = () => {
     };
 
     const profesores = usuarios.filter(u => u.role === 'Profesor');
-    const estudiantes = usuarios.filter(u => u.role === 'Estudiante');
+    const usuariosAsignables = usuarios.filter(u => u.role !== 'Admin');
+    const countBy = (items, getKey) => items.reduce((acc, item) => {
+        const key = getKey(item) || 'Sin dato';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+    const roleDistribution = Object.entries(countBy(usuarios, u => u.role)).map(([label, value]) => ({ label, value }));
+    const groupStatusData = [
+        { label: 'Activas', value: grupos.filter(g => g.activo !== false).length },
+        { label: 'Inactivas', value: grupos.filter(g => g.activo === false).length }
+    ];
+    const actionSectionData = Object.entries(countBy(actionLogs, log => log.seccion)).map(([label, value]) => ({ label, value }));
+    const actionTypeData = Object.entries(countBy(actionLogs, log => log.accion)).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+    const sessionDeviceData = Object.entries(countBy(sessionLogs, session => session.cliente?.dispositivo)).map(([label, value]) => ({ label, value }));
+    const recentActivityData = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date();
+        date.setDate(date.getDate() - (6 - index));
+        const key = date.toISOString().slice(0, 10);
+        return {
+            label: date.toLocaleDateString(undefined, { weekday: 'short' }),
+            value: actionLogs.filter(log => log.fecha_creacion?.slice(0, 10) === key).length
+        };
+    });
+    const topUsersData = Object.entries(countBy(actionLogs, log => log.usuario?.email || (log.id_usuario ? `Usuario #${log.id_usuario}` : 'Sistema')))
+        .map(([label, value]) => ({ label, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 6);
+    const maxRoleCount = Math.max(...roleDistribution.map(item => item.value), 1);
+    const maxActionCount = Math.max(...actionSectionData.map(item => item.value), 1);
+    const maxActionTypeCount = Math.max(...actionTypeData.map(item => item.value), 1);
+    const maxRecentActivityCount = Math.max(...recentActivityData.map(item => item.value), 1);
+    const maxTopUserCount = Math.max(...topUsersData.map(item => item.value), 1);
+    const activeUsers = usuarios.filter(u => !u.bloqueado && u.activo !== false).length;
+    const blockedUsers = usuarios.filter(u => u.bloqueado).length;
+    const activeSessions = logStats.sesionesActivas || sessionLogs.filter(session => session.estado === 'ACTIVA').length;
+    const failureRate = logStats.totalAcciones > 0 ? Math.round((logStats.accionesFallidas / logStats.totalAcciones) * 100) : 0;
+    const aiShare = logStats.totalAcciones > 0 ? Math.round((logStats.consultasIA / logStats.totalAcciones) * 100) : 0;
+    const averageStudentsPerClass = grupos.length > 0
+        ? Math.round(grupos.reduce((sum, group) => sum + (group.integrantes?.length || 0), 0) / grupos.length)
+        : 0;
+    const securitySignals = [
+        { label: 'Acciones fallidas 24h', value: logStats.accionesFallidas || 0, color: '#ef4444' },
+        { label: 'Usuarios bloqueados', value: blockedUsers, color: '#f97316' },
+        { label: 'Sesiones activas', value: activeSessions, color: '#10b981' },
+        { label: 'Tasa de fallos', value: `${failureRate}%`, color: failureRate > 20 ? '#ef4444' : '#10b981' }
+    ];
+    const permisosPorRecurso = permisos.reduce((acc, permiso) => {
+        const key = permiso.recurso || 'General';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(permiso);
+        return acc;
+    }, {});
+    const recursosPermisos = Object.entries(permisosPorRecurso);
+    const permisoActivoEnRol = (rol, permiso) => rol.permisos?.some(rolePermission => rolePermission.id === permiso.id);
+    const statCard = (label, value, hint, color, icon) => (
+        <div style={{ padding: '1rem', borderRadius: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--glass-border)', borderLeft: `4px solid ${color}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color }}>
+                {icon}
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
+            </div>
+            <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.5rem' }}>{value}</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{hint}</div>
+        </div>
+    );
+    const showChartTooltip = (event, title, value, subtitle) => {
+        setChartTooltip({
+            x: event.clientX + 14,
+            y: event.clientY + 14,
+            title,
+            value,
+            subtitle
+        });
+    };
+    const hideChartTooltip = () => setChartTooltip(null);
+    const barList = (data, max, color = 'var(--primary-color)') => (
+        <div style={{ display: 'grid', gap: '0.8rem' }}>
+            {data.length === 0 && <span style={{ color: 'var(--text-muted)' }}>Sin datos disponibles.</span>}
+            {data.map(item => (
+                <div key={item.label}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                    </div>
+                    <div style={{ height: '10px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.max(5, (item.value / max) * 100)}%`, height: '100%', background: color, borderRadius: '999px' }} />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+    const donut = (value, total, color, label) => {
+        const percent = total > 0 ? Math.round((value / total) * 100) : 0;
+        return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: 118, height: 118, borderRadius: '50%', background: `conic-gradient(${color} ${percent}%, rgba(255,255,255,0.08) 0)`, display: 'grid', placeItems: 'center' }}>
+                    <div style={{ width: 82, height: 82, borderRadius: '50%', background: 'var(--card-bg, #111827)', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: '1.35rem' }}>{percent}%</div>
+                </div>
+                <div>
+                    <div style={{ fontWeight: 800 }}>{label}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{value} de {total}</div>
+                </div>
+            </div>
+        );
+    };
+    const verticalBars = (data, max, color = 'var(--primary-color)') => (
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(data.length, 1)}, minmax(38px, 1fr))`, alignItems: 'end', gap: '0.75rem', minHeight: '230px', paddingTop: '1rem' }}>
+            {data.length === 0 && <span style={{ color: 'var(--text-muted)' }}>Sin datos disponibles.</span>}
+            {data.map(item => {
+                const height = max > 0 ? Math.max(10, (item.value / max) * 160) : 10;
+                return (
+                    <div key={item.label} style={{ display: 'grid', gap: '0.45rem', alignItems: 'end', justifyItems: 'center' }}>
+                        <strong style={{ fontSize: '0.85rem' }}>{item.value}</strong>
+                        <div style={{ width: '100%', height: 170, display: 'flex', alignItems: 'end', justifyContent: 'center', borderBottom: '1px solid var(--glass-border)' }}>
+                            <div
+                                title={`${item.label}: ${item.value}`}
+                                onMouseEnter={(event) => showChartTooltip(event, item.label, item.value, 'Acciones registradas')}
+                                onMouseMove={(event) => showChartTooltip(event, item.label, item.value, 'Acciones registradas')}
+                                onMouseLeave={hideChartTooltip}
+                                style={{
+                                    width: '70%',
+                                    maxWidth: 46,
+                                    height,
+                                    borderRadius: '8px 8px 2px 2px',
+                                    background: `linear-gradient(180deg, ${color}, rgba(255,255,255,0.18))`,
+                                    boxShadow: `0 10px 24px ${color}33`,
+                                    cursor: 'pointer',
+                                    transition: 'filter 160ms ease, transform 160ms ease'
+                                }}
+                            />
+                        </div>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textAlign: 'center', minHeight: 32 }}>{item.label}</span>
+                    </div>
+                );
+            })}
+        </div>
+    );
+    const lineChart = (data, color = '#60a5fa') => {
+        const width = 560;
+        const height = 220;
+        const padding = 30;
+        const max = Math.max(...data.map(item => item.value), 1);
+        const step = data.length > 1 ? (width - padding * 2) / (data.length - 1) : 0;
+        const points = data.map((item, index) => ({
+            ...item,
+            x: padding + index * step,
+            y: height - padding - (item.value / max) * (height - padding * 2)
+        }));
+        const polyline = points.map(point => `${point.x},${point.y}`).join(' ');
+        const area = points.length > 0
+            ? `${padding},${height - padding} ${polyline} ${width - padding},${height - padding}`
+            : '';
+
+        return (
+            <div style={{ overflowX: 'auto' }}>
+                <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', minWidth: 360, height: 230 }}>
+                    <defs>
+                        <linearGradient id="activityArea" x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+                        </linearGradient>
+                    </defs>
+                    {[0, 1, 2, 3].map(line => {
+                        const y = padding + line * ((height - padding * 2) / 3);
+                        return <line key={line} x1={padding} x2={width - padding} y1={y} y2={y} stroke="rgba(255,255,255,0.08)" strokeWidth="1" />;
+                    })}
+                    {area && <polygon points={area} fill="url(#activityArea)" />}
+                    {polyline && <polyline points={polyline} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
+                    {points.map(point => (
+                        <g
+                            key={point.label}
+                            onMouseEnter={(event) => showChartTooltip(event, point.label, point.value, 'Actividad del día')}
+                            onMouseMove={(event) => showChartTooltip(event, point.label, point.value, 'Actividad del día')}
+                            onMouseLeave={hideChartTooltip}
+                            style={{ cursor: 'pointer' }}
+                        >
+                            <circle cx={point.x} cy={point.y} r="16" fill="transparent" />
+                            <circle cx={point.x} cy={point.y} r="5" fill={color} stroke="var(--card-bg, #111827)" strokeWidth="3" />
+                            <circle cx={point.x} cy={point.y} r="9" fill="none" stroke={color} strokeOpacity="0.24" strokeWidth="2" />
+                            <text x={point.x} y={height - 8} fill="var(--text-muted)" fontSize="12" textAnchor="middle">{point.label}</text>
+                        </g>
+                    ))}
+                </svg>
+            </div>
+        );
+    };
+    const stackedSegments = (data, colors = ['#6366f1', '#10b981', '#f59e0b', '#a78bfa']) => {
+        const total = data.reduce((sum, item) => sum + item.value, 0);
+        return (
+            <div style={{ display: 'grid', gap: '0.9rem' }}>
+                <div style={{ display: 'flex', height: 18, overflow: 'hidden', borderRadius: 999, background: 'rgba(255,255,255,0.08)' }}>
+                    {data.map((item, index) => (
+                        <div
+                            key={item.label}
+                            title={`${item.label}: ${item.value}`}
+                            style={{
+                                width: total > 0 ? `${(item.value / total) * 100}%` : '0%',
+                                background: colors[index % colors.length],
+                                minWidth: item.value > 0 ? 8 : 0
+                            }}
+                        />
+                    ))}
+                </div>
+                <div style={{ display: 'grid', gap: '0.6rem' }}>
+                    {data.length === 0 && <span style={{ color: 'var(--text-muted)' }}>Sin datos disponibles.</span>}
+                    {data.map((item, index) => (
+                        <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)' }}>
+                                <span style={{ width: 10, height: 10, borderRadius: 999, background: colors[index % colors.length] }} />
+                                {item.label}
+                            </span>
+                            <strong>{item.value}</strong>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className="dashboard-container">
@@ -195,10 +516,16 @@ const AdminDashboard = () => {
                     <Users size={18} /> Usuarios
                 </div>
                 <div className={`tab-item ${activeTab === 'grupos' ? 'active' : ''}`} onClick={() => setActiveTab('grupos')}>
-                    <LayoutGrid size={18} /> Grupos
+                    <LayoutGrid size={18} /> Clases / Materias
                 </div>
                 <div className={`tab-item ${activeTab === 'permisos' ? 'active' : ''}`} onClick={() => setActiveTab('permisos')}>
-                    <Key size={18} /> Roles y Permisos
+                    <Key size={18} /> Perfiles y Permisos
+                </div>
+                <div className={`tab-item ${activeTab === 'analiticas' ? 'active' : ''}`} onClick={() => setActiveTab('analiticas')}>
+                    <BarChart3 size={18} /> Analíticas
+                </div>
+                <div className={`tab-item ${activeTab === 'auditoria' ? 'active' : ''}`} onClick={() => { setActiveTab('auditoria'); cargarAuditoria(); }}>
+                    <FileText size={18} /> Auditoría y Logs
                 </div>
             </nav>
 
@@ -213,16 +540,13 @@ const AdminDashboard = () => {
                                     <button onClick={() => { setEditingUser(null); setUserData({ email: '', password: '', id_rol: '' }); setShowUserModal(true); }} className="action-btn" style={{ background: 'var(--primary-color)', color: 'white' }}>
                                         <Plus size={18} /> Nuevo Usuario
                                     </button>
-                                    <button onClick={() => setShowAssignModal(true)} className="action-btn" style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }}>
-                                        <UserPlus size={18} /> Asignar Alumno
-                                    </button>
                                 </div>
                             </div>
                             <table className="premium-table">
                                 <thead>
                                     <tr>
                                         <th>Email</th>
-                                        <th>Rol</th>
+                                        <th>Perfil</th>
                                         <th>Estado</th>
                                         <th>Acciones</th>
                                     </tr>
@@ -248,6 +572,7 @@ const AdminDashboard = () => {
                                                     </button>
                                                 )}
                                                 <button onClick={() => abrirEdicion(u)} className="action-btn" title="Editar"><Shield size={16} /></button>
+                                                <button onClick={() => verRolesUsuario(u)} className="action-btn" title="Ver cargos en aulas"><LayoutGrid size={16} /></button>
                                                 <button onClick={() => eliminarUsuario(u.id)} className="action-btn danger" title="Eliminar"><Trash2 size={16} /></button>
                                             </td>
                                         </tr>
@@ -261,32 +586,206 @@ const AdminDashboard = () => {
                     {activeTab === 'grupos' && (
                         <div className="glass-card">
                             <div className="card-header">
-                                <h2 className="card-title"><LayoutGrid size={24} color="var(--primary-color)" /> Grupos de Clase</h2>
+                                <h2 className="card-title"><LayoutGrid size={24} color="var(--primary-color)" /> Clases / Materias</h2>
                                 <button onClick={() => setShowGroupModal(true)} className="action-btn" style={{ background: 'var(--primary-color)', color: 'white' }}>
-                                    <Plus size={18} /> Crear Grupo
+                                    <Plus size={18} /> Crear Clase/Materia
                                 </button>
                             </div>
                             <table className="premium-table">
                                 <thead>
                                     <tr>
-                                        <th>Nombre</th>
+                                        <th>Clase / Materia</th>
                                         <th>Descripción</th>
                                         <th>Tutor/Profesor</th>
                                         <th>Estado</th>
+                                        <th>Miembros</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {grupos.map(g => (
-                                        <tr key={g.id}>
-                                            <td style={{ fontWeight: 'bold' }}>{g.nombre}</td>
-                                            <td>{g.descripcion}</td>
-                                            <td>{g.profesor?.email || 'Sin tutor'}</td>
-                                            <td><span className={`status-badge ${g.activo ? 'status-active' : 'status-inactive'}`}>{g.activo ? 'Activo' : 'Inactivo'}</span></td>
-                                        </tr>
+                                        <Fragment key={g.id}>
+                                            <tr>
+                                                <td style={{ fontWeight: 'bold' }}>
+                                                    <button className="action-btn" onClick={() => toggleGrupoExpandido(g.id)} style={{ marginRight: '0.5rem', padding: '0.25rem 0.5rem' }}>
+                                                        {expandedGroupId === g.id ? '-' : '+'}
+                                                    </button>
+                                                    {g.nombre}
+                                                </td>
+                                                <td>{g.descripcion}</td>
+                                                <td>{g.profesor?.email || 'Sin tutor'}</td>
+                                                <td><span className={`status-badge ${g.activo ? 'status-active' : 'status-inactive'}`}>{g.activo ? 'Activo' : 'Inactivo'}</span></td>
+                                                <td>
+                                                    <button className="action-btn copy-btn" onClick={() => abrirGestionReBACAdmin(g)} title="Gestionar miembros">
+                                                        <Users size={16} /> Gestionar miembros
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {expandedGroupId === g.id && (
+                                                <tr>
+                                                    <td colSpan="5">
+                                                        <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                                            <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', textTransform: 'uppercase', fontWeight: 700 }}>
+                                                                Resumen de miembros actuales
+                                                            </div>
+                                                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                                {(groupContextRoles[g.id] || []).map(role => (
+                                                                    <span key={role.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                                                                        <ContextRoleBadge role={role.relacion} /> {role.email || `Usuario #${role.id_usuario}`}
+                                                                    </span>
+                                                                ))}
+                                                                {(!groupContextRoles[g.id] || groupContextRoles[g.id].length === 0) && (
+                                                                    <span style={{ color: 'var(--text-muted)' }}>Sin roles contextuales activos.</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
                                     ))}
-                                    {grupos.length === 0 && <tr><td colSpan="4" style={{textAlign: 'center', color: 'var(--text-muted)'}}>No hay grupos creados.</td></tr>}
+                                    {grupos.length === 0 && <tr><td colSpan="5" style={{textAlign: 'center', color: 'var(--text-muted)'}}>No hay clases/materias creadas.</td></tr>}
                                 </tbody>
                             </table>
+                        </div>
+                    )}
+
+                    {activeTab === 'analiticas' && (
+                        <div style={{ display: 'grid', gap: '1.5rem' }}>
+                            <div className="glass-card">
+                                <div className="card-header">
+                                    <h2 className="card-title"><BarChart3 size={24} color="var(--primary-color)" /> Analíticas del sistema</h2>
+                                    <button className="action-btn" onClick={cargarTodo}>
+                                        <TrendingUp size={16} /> Actualizar
+                                    </button>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+                                    {statCard('Usuarios activos', activeUsers, `${blockedUsers} bloqueados`, 'var(--primary-color)', <Users size={18} />)}
+                                    {statCard('Sesiones activas', activeSessions, 'Conexiones abiertas', '#10b981', <Activity size={18} />)}
+                                    {statCard('Acciones 24h', logStats.totalAcciones, `${logStats.consultasIA} consultas IA`, '#a78bfa', <BarChart3 size={18} />)}
+                                    {statCard('Tasa de fallos', `${failureRate}%`, `${logStats.accionesFallidas} fallidas`, failureRate > 20 ? '#ef4444' : '#f59e0b', <AlertTriangle size={18} />)}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: '1.5rem' }}>
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><BarChart3 size={20} color="#60a5fa" /> Actividad por día</h3>
+                                    </div>
+                                    {verticalBars(recentActivityData, maxRecentActivityCount, '#60a5fa')}
+                                </div>
+
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><TrendingUp size={20} color="#38bdf8" /> Tendencia semanal</h3>
+                                    </div>
+                                    {lineChart(recentActivityData, '#38bdf8')}
+                                </div>
+
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><PieChart size={20} color="var(--primary-color)" /> Usuarios por perfil</h3>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '1.2rem' }}>
+                                        {stackedSegments(roleDistribution)}
+                                        {barList(roleDistribution, maxRoleCount, 'var(--primary-color)')}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem' }}>
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><LayoutGrid size={20} color="#10b981" /> Estado de clases</h3>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '1rem' }}>
+                                        {donut(groupStatusData[0].value, grupos.length, '#10b981', 'Clases activas')}
+                                        {barList(groupStatusData, Math.max(...groupStatusData.map(item => item.value), 1), '#10b981')}
+                                    </div>
+                                </div>
+
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><Activity size={20} color="#f97316" /> Acciones por tipo</h3>
+                                    </div>
+                                    {barList(actionTypeData, maxActionTypeCount, '#f97316')}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem' }}>
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><Users size={20} color="#10b981" /> Usuarios con más actividad</h3>
+                                    </div>
+                                    {barList(topUsersData, maxTopUserCount, '#10b981')}
+                                </div>
+
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><Activity size={20} color="#f59e0b" /> Acciones por sección</h3>
+                                    </div>
+                                    {barList(actionSectionData, maxActionCount, '#f59e0b')}
+                                </div>
+
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><Bot size={20} color="#a78bfa" /> Uso IA y sesiones</h3>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '1.25rem' }}>
+                                        {donut(logStats.consultasIA, logStats.totalAcciones, '#a78bfa', 'Consultas IA 24h')}
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{aiShare}% de la actividad reciente corresponde a IA.</div>
+                                        {barList(sessionDeviceData, Math.max(...sessionDeviceData.map(item => item.value), 1), '#60a5fa')}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem' }}>
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><LayoutGrid size={20} color="#10b981" /> Resumen académico</h3>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '0.9rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Clases totales</span><strong>{grupos.length}</strong></div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Clases activas</span><strong>{groupStatusData[0].value}</strong></div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Promedio alumnos/clase</span><strong>{averageStudentsPerClass}</strong></div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Profesores registrados</span><strong>{profesores.length}</strong></div>
+                                    </div>
+                                </div>
+
+                                <div className="glass-card">
+                                    <div className="card-header">
+                                        <h3 className="card-title"><Shield size={20} color="#ef4444" /> Señales de seguridad</h3>
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                        {securitySignals.map(signal => (
+                                            <div key={signal.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', border: '1px solid var(--glass-border)', borderRadius: '8px', background: 'rgba(255,255,255,0.03)' }}>
+                                                <span style={{ color: 'var(--text-muted)' }}>{signal.label}</span>
+                                                <strong style={{ color: signal.color }}>{signal.value}</strong>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            {chartTooltip && (
+                                <div
+                                    style={{
+                                        position: 'fixed',
+                                        left: chartTooltip.x,
+                                        top: chartTooltip.y,
+                                        zIndex: 9999,
+                                        minWidth: 150,
+                                        padding: '0.75rem 0.85rem',
+                                        borderRadius: 8,
+                                        background: 'rgba(8, 13, 28, 0.96)',
+                                        border: '1px solid var(--glass-border)',
+                                        boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
+                                        pointerEvents: 'none'
+                                    }}
+                                >
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 800 }}>{chartTooltip.subtitle}</div>
+                                    <div style={{ fontWeight: 800, marginTop: '0.2rem' }}>{chartTooltip.title}</div>
+                                    <div style={{ color: '#60a5fa', fontSize: '1.4rem', fontWeight: 900, marginTop: '0.25rem' }}>{chartTooltip.value}</div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -295,11 +794,11 @@ const AdminDashboard = () => {
                         <>
                             <div className="stats-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
                                 <div className="glass-card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '4px solid var(--primary-color)' }}>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Total Roles</div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Total Perfiles</div>
                                     <div style={{ fontSize: '2.5rem', fontWeight: 'bold', marginTop: '0.5rem' }}>{roles.length}</div>
                                 </div>
                                 <div className="glass-card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '4px solid #10b981' }}>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Roles Activos</div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Perfiles Activos</div>
                                     <div style={{ fontSize: '2.5rem', fontWeight: 'bold', marginTop: '0.5rem' }}>{roles.filter(r => r.activo !== false).length}</div>
                                 </div>
                                 <div className="glass-card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '4px solid #f59e0b' }}>
@@ -309,7 +808,7 @@ const AdminDashboard = () => {
                                 <div className="glass-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '2px dashed var(--primary-color)', background: 'transparent' }} onClick={() => setShowRoleModal(true)}>
                                     <div style={{ textAlign: 'center', color: 'var(--primary-color)' }}>
                                         <Plus size={32} />
-                                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>NUEVO ROL</div>
+                                        <div style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>NUEVO PERFIL</div>
                                     </div>
                                 </div>
                             </div>
@@ -317,7 +816,7 @@ const AdminDashboard = () => {
                             {/* TABLA DE ROLES */}
                             <div className="glass-card" style={{ marginBottom: '2rem' }}>
                                 <div className="card-header">
-                                    <h3 className="card-title"><Shield size={20} color="var(--primary-color)" /> Roles del Sistema</h3>
+                                    <h3 className="card-title"><Shield size={20} color="var(--primary-color)" /> Perfiles del Sistema</h3>
                                 </div>
                                 <table className="premium-table">
                                     <thead>
@@ -376,48 +875,249 @@ const AdminDashboard = () => {
                                 </table>
                             </div>
 
-                            <div className="permissions-grid">
-                            {roles.map(r => {
-                                // Agrupar permisos por recurso para este rol
-                                const groupedPerms = permisos.reduce((acc, p) => {
-                                    const key = p.recurso || 'General';
-                                    if (!acc[key]) acc[key] = [];
-                                    acc[key].push(p);
-                                    return acc;
-                                }, {});
-
-                                return (
-                                    <div key={r.id} className="glass-card">
-                                        <h3 style={{ marginBottom: '1.5rem', color: 'var(--primary-color)', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem' }}>{r.nombre}</h3>
-                                        {Object.entries(groupedPerms).map(([recurso, permsEnGrupo]) => (
-                                            <div key={recurso} style={{ marginBottom: '1.5rem' }}>
-                                                <h4 style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem', letterSpacing: '1px' }}>{recurso}</h4>
-                                                {permsEnGrupo.map(p => {
-                                                    const tiene = r.permisos?.some(rp => rp.id === p.id);
-                                                    return (
-                                                        <div key={p.id} className="perm-item">
-                                                            <div>
-                                                                <div style={{ fontSize: '0.9rem', fontWeight: '500' }}>{p.nombre}</div>
-                                                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{p.descripcion}</div>
-                                                            </div>
-                                                            <label className="toggle-switch">
-                                                                <input 
-                                                                    type="checkbox" 
-                                                                    checked={tiene} 
-                                                                    onChange={() => togglePermiso(r.id, p.id, tiene)}
-                                                                />
-                                                                <span className="slider"></span>
-                                                            </label>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        ))}
+                            <div className="glass-card permission-matrix-card">
+                                <div className="card-header">
+                                    <div>
+                                        <h3 className="card-title"><LayoutGrid size={20} color="var(--primary-color)" /> Matriz Visual de Permisos</h3>
+                                        <p style={{ margin: '0.45rem 0 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                            Haz clic en una celda para activar o desactivar un permiso del perfil.
+                                        </p>
                                     </div>
-                                );
-                            })}
-                        </div>
+                                </div>
+
+                                <div className="permission-matrix-wrap">
+                                    <table className="permission-matrix">
+                                        <thead>
+                                            <tr>
+                                                <th className="role-head" rowSpan="2">Perfiles / Permisos</th>
+                                                {recursosPermisos.map(([recurso, permsEnGrupo]) => (
+                                                    <th key={recurso} className="resource-head" colSpan={permsEnGrupo.length}>
+                                                        {recurso}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                            <tr>
+                                                {recursosPermisos.flatMap(([recurso, permsEnGrupo]) => (
+                                                    permsEnGrupo.map(permiso => (
+                                                        <th key={`${recurso}-${permiso.id}`} className="permission-head" title={permiso.descripcion || permiso.nombre}>
+                                                            <span>{permiso.nombre}</span>
+                                                        </th>
+                                                    ))
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {roles.map(rol => (
+                                                <tr key={rol.id}>
+                                                    <th className="role-cell">
+                                                        <strong>{rol.nombre}</strong>
+                                                        <span>{rol.tipo || 'Sin tipo'}</span>
+                                                    </th>
+                                                    {recursosPermisos.flatMap(([, permsEnGrupo]) => (
+                                                        permsEnGrupo.map(permiso => {
+                                                            const tiene = permisoActivoEnRol(rol, permiso);
+                                                            return (
+                                                                <td key={`${rol.id}-${permiso.id}`} className={tiene ? 'permission-cell enabled' : 'permission-cell disabled'}>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="permission-toggle-cell"
+                                                                        title={`${rol.nombre} / ${permiso.nombre}: ${tiene ? 'Activo' : 'Inactivo'}`}
+                                                                        aria-label={`${tiene ? 'Desactivar' : 'Activar'} ${permiso.nombre} para ${rol.nombre}`}
+                                                                        onClick={() => togglePermiso(rol.id, permiso.id, tiene)}
+                                                                    >
+                                                                        {tiene ? <CheckCircle size={18} /> : <X size={17} />}
+                                                                    </button>
+                                                                </td>
+                                                            );
+                                                        })
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </>
+                    )}
+                    {activeTab === 'auditoria' && (
+                        <div className="glass-card">
+                            <div className="card-header">
+                                <h2 className="card-title"><FileText size={24} color="var(--primary-color)" /> Auditoría y Logs</h2>
+                            </div>
+
+                            <div className="stats-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                                <div style={{ padding: '1rem', borderLeft: '4px solid var(--primary-color)', borderRadius: '8px', background: 'rgba(255,255,255,0.04)' }}>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Total 24h</div>
+                                    <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>{logStats.totalAcciones}</div>
+                                </div>
+                                <div style={{ padding: '1rem', borderLeft: '4px solid #ef4444', borderRadius: '8px', background: 'rgba(255,255,255,0.04)' }}>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Fallidas</div>
+                                    <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>{logStats.accionesFallidas}</div>
+                                </div>
+                                <div style={{ padding: '1rem', borderLeft: '4px solid #10b981', borderRadius: '8px', background: 'rgba(255,255,255,0.04)' }}>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Sesiones activas</div>
+                                    <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>{logStats.sesionesActivas}</div>
+                                </div>
+                                <div style={{ padding: '1rem', borderLeft: '4px solid #a78bfa', borderRadius: '8px', background: 'rgba(255,255,255,0.04)' }}>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Consultas IA</div>
+                                    <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>{logStats.consultasIA}</div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                                <select className="form-select" value={auditFilters.fecha} onChange={(e) => cambiarFiltroAuditoria('fecha', e.target.value)}>
+                                    <option value="hoy">Hoy</option>
+                                    <option value="semana">Última semana</option>
+                                    <option value="mes">Último mes</option>
+                                    <option value="todo">Todo</option>
+                                </select>
+                                <select className="form-select" value={auditFilters.categoria} onChange={(e) => cambiarFiltroAuditoria('categoria', e.target.value)}>
+                                    <option value="">Todas las categorias</option>
+                                    <option value="LOGIN">Login</option>
+                                    <option value="ADMIN">Admin</option>
+                                    <option value="PROFESOR">Profesor</option>
+                                    <option value="ESTUDIANTE">Estudiante</option>
+                                    <option value="IA">IA</option>
+                                    <option value="PBAC">PBAC</option>
+                                </select>
+                                <select className="form-select" value={auditFilters.exito} onChange={(e) => cambiarFiltroAuditoria('exito', e.target.value)}>
+                                    <option value="">Todos los estados</option>
+                                    <option value="true">Exito</option>
+                                    <option value="false">Fallido / denegado</option>
+                                </select>
+                                <select className="form-select" value={auditFilters.nivel} onChange={(e) => cambiarFiltroAuditoria('nivel', e.target.value)}>
+                                    <option value="">Todos los niveles</option>
+                                    <option value="info">Info</option>
+                                    <option value="warning">Warning</option>
+                                    <option value="danger">Danger</option>
+                                </select>
+                                <select className="form-select" value={auditFilters.id_usuario} onChange={(e) => cambiarFiltroAuditoria('id_usuario', e.target.value)}>
+                                    <option value="">Todos los usuarios</option>
+                                    {usuarios.map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
+                                </select>
+                                <input className="form-input" placeholder="Buscar accion" value={auditFilters.accion} onChange={(e) => cambiarFiltroAuditoria('accion', e.target.value)} />
+                            </div>
+
+                            <h3 className="card-title" style={{ marginTop: '1rem' }}>Logs de Acciones</h3>
+                            <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+                                <table className="premium-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Fecha</th>
+                                            <th>Resultado</th>
+                                            <th>Sección</th>
+                                            <th>Acción</th>
+                                            <th>Usuario</th>
+                                            <th>Cliente</th>
+                                            <th>Descripción</th>
+                                            <th>Detalle</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {actionLogs.map(log => {
+                                            const visual = actionVisual(log);
+                                            return (
+                                            <tr key={log.id} style={{ background: log.resultado === 'DENIED' || log.resultado === 'FAILED' ? 'rgba(239, 68, 68, 0.06)' : 'transparent' }}>
+                                                <td>{new Date(log.fecha_creacion).toLocaleString()}</td>
+                                                <td>
+                                                    <span className={`status-badge ${log.resultado === 'DENIED' || log.resultado === 'FAILED' ? 'status-inactive' : 'status-active'}`}>
+                                                        {log.resultado}
+                                                    </span>
+                                                </td>
+                                                <td>{log.seccion}</td>
+                                                <td>
+                                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: visual.color, fontWeight: 700 }}>
+                                                        {visual.icon}
+                                                        {log.accion}
+                                                    </span>
+                                                </td>
+                                                <td>{log.usuario?.email || (log.id_usuario ? `Usuario #${log.id_usuario}` : 'Sistema')}</td>
+                                                <td>{log.cliente ? `${log.cliente.navegador} / ${log.cliente.sistema_operativo}` : '-'}</td>
+                                                <td>{log.descripcion}</td>
+                                                <td><button className="action-btn" onClick={() => setSelectedAuditLog(log)}>Ver JSON</button></td>
+                                            </tr>
+                                        );})}
+                                        {actionLogs.length === 0 && (
+                                            <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>No hay acciones para los filtros seleccionados.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <h3 className="card-title">Logs de Sesiones</h3>
+                            <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+                                <table className="premium-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Inicio</th>
+                                            <th>Fin</th>
+                                            <th>Estado</th>
+                                            <th>Usuario</th>
+                                            <th>Dispositivo</th>
+                                            <th>Navegador</th>
+                                            <th>IP</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {sessionLogs.map(session => (
+                                            <tr key={session.id}>
+                                                <td>{new Date(session.fecha_inicio).toLocaleString()}</td>
+                                                <td>{session.fecha_fin ? new Date(session.fecha_fin).toLocaleString() : '-'}</td>
+                                                <td><span className={`status-badge ${session.estado === 'ACTIVA' ? 'status-active' : 'status-inactive'}`}>{session.estado}</span></td>
+                                                <td>{session.usuario?.email || `Usuario #${session.id_usuario}`}</td>
+                                                <td>{session.cliente?.dispositivo || '-'}</td>
+                                                <td>{session.cliente ? `${session.cliente.navegador} / ${session.cliente.sistema_operativo}` : '-'}</td>
+                                                <td>{session.ip_address || '-'}</td>
+                                            </tr>
+                                        ))}
+                                        {sessionLogs.length === 0 && (
+                                            <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No hay sesiones para los filtros seleccionados.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <h3 className="card-title">Auditoría Legacy</h3>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table className="premium-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Fecha</th>
+                                            <th>Nivel</th>
+                                            <th>Sección</th>
+                                            <th>Acción</th>
+                                            <th>Usuario</th>
+                                            <th>Descripción</th>
+                                            <th>Detalle</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {auditLogs.map(log => (
+                                            <tr key={log.id}>
+                                                <td>{new Date(log.fecha_creacion).toLocaleString()}</td>
+                                                <td>
+                                                    <span className={`status-badge ${log.nivel === 'danger' ? 'status-inactive' : 'status-active'}`}>
+                                                        {log.nivel}
+                                                    </span>
+                                                </td>
+                                                <td>{log.seccion}</td>
+                                                <td>{log.accion}</td>
+                                                <td>{log.usuario?.email || (log.id_usuario ? `Usuario #${log.id_usuario}` : 'Sistema')}</td>
+                                                <td>{log.descripcion}</td>
+                                                <td>
+                                                    <button className="action-btn" onClick={() => setSelectedAuditLog(log)}>
+                                                        Ver JSON
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {auditLogs.length === 0 && (
+                                            <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No hay logs para los filtros seleccionados.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     )}
                     {/* Modal Crear/Editar Usuario */}
                     {showUserModal && (
@@ -449,14 +1149,14 @@ const AdminDashboard = () => {
                                         />
                                     </div>
                                     <div className="form-group">
-                                        <label className="form-label">Rol</label>
+                                        <label className="form-label">Perfil / Tipo de cuenta</label>
                                         <select 
                                             className="form-select" 
                                             required 
                                             value={userData.id_rol} 
                                             onChange={(e) => setUserData({...userData, id_rol: e.target.value})}
                                         >
-                                            <option value="">-- Selecciona un Rol --</option>
+                                            <option value="">-- Selecciona un perfil --</option>
                                             {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
                                         </select>
                                     </div>
@@ -473,12 +1173,12 @@ const AdminDashboard = () => {
                         <div className="modal-overlay">
                             <div className="modal-content">
                                 <div className="card-header">
-                                    <h2>Crear Nuevo Rol</h2>
+                                    <h2>Crear Nuevo Perfil</h2>
                                     <button onClick={() => setShowRoleModal(false)} className="action-btn"><X size={20} /></button>
                                 </div>
                                 <form onSubmit={crearRol}>
                                     <div className="form-group">
-                                        <label className="form-label">Nombre del Rol</label>
+                                        <label className="form-label">Nombre del perfil</label>
                                         <input 
                                             type="text" 
                                             className="form-input" 
@@ -489,7 +1189,7 @@ const AdminDashboard = () => {
                                         />
                                     </div>
                                     <div className="form-group">
-                                        <label className="form-label">Tipo de Rol</label>
+                                        <label className="form-label">Tipo de perfil</label>
                                         <select 
                                             className="form-select" 
                                             required 
@@ -531,7 +1231,7 @@ const AdminDashboard = () => {
                                         </div>
                                     </div>
                                     <button type="submit" className="action-btn" style={{ background: 'var(--primary-color)', color: 'white', width: '100%', marginTop: '1rem' }}>
-                                        Guardar Rol
+                                        Guardar Perfil
                                     </button>
                                 </form>
                             </div>
@@ -540,28 +1240,63 @@ const AdminDashboard = () => {
                 </>
             )}
 
-            {/* Modal Asignar Estudiante */}
-            {showAssignModal && (
+            {selectedAuditLog && (
                 <div className="modal-overlay">
-                    <div className="modal-content">
-                        <div className="card-header"><h2>Vincular Estudiante</h2><button onClick={() => setShowAssignModal(false)} className="action-btn"><X size={20} /></button></div>
-                        <form onSubmit={manejarAsignacion}>
-                            <div className="form-group">
-                                <label className="form-label">Profesor</label>
-                                <select className="form-select" required onChange={(e) => setAssignmentData({...assignmentData, id_profesor: e.target.value})}>
-                                    <option value="">-- Elige --</option>
-                                    {profesores.map(p => <option key={p.id} value={p.id}>{p.email}</option>)}
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Estudiante</label>
-                                <select className="form-select" required onChange={(e) => setAssignmentData({...assignmentData, id_estudiante: e.target.value})}>
-                                    <option value="">-- Elige --</option>
-                                    {estudiantes.map(e => <option key={e.id} value={e.id}>{e.email}</option>)}
-                                </select>
-                            </div>
-                            <button type="submit" className="action-btn" style={{ background: 'var(--primary-color)', color: 'white', width: '100%' }}>Asignar</button>
-                        </form>
+                    <div className="modal-content" style={{ maxWidth: '760px' }}>
+                        <div className="card-header">
+                            <h2>Detalle de Auditoría</h2>
+                            <button onClick={() => setSelectedAuditLog(null)} className="action-btn"><X size={20} /></button>
+                        </div>
+                        <pre style={{ whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '1rem', maxHeight: '420px', overflow: 'auto' }}>
+                            {JSON.stringify(selectedAuditLog.metadata || {}, null, 2)}
+                        </pre>
+                    </div>
+                </div>
+            )}
+
+            {rebacGroup && (
+                <ReBACManagementModal
+                    title={`Gestionar miembros: ${rebacGroup.nombre}`}
+                    roles={groupContextRoles[rebacGroup.id] || []}
+                    users={usuariosAsignables}
+                    onClose={() => setRebacGroup(null)}
+                    onAssign={asignarRolContextualAdmin}
+                    onRevoke={revocarRolContextualAdmin}
+                    assignableRoles={['director_grupo', 'profesor_materia', 'tutor_asistente', 'alumno']}
+                    userLabel="Usuario"
+                    userPlaceholder="Selecciona un usuario"
+                    multiple
+                />
+            )}
+
+            {selectedUserRoles && (
+                <div className="modal-overlay">
+                    <div className="modal-content" style={{ maxWidth: '680px' }}>
+                        <div className="card-header">
+                            <h2>Cargos en aulas: {selectedUserRoles.usuario.email}</h2>
+                            <button onClick={() => setSelectedUserRoles(null)} className="action-btn"><X size={20} /></button>
+                        </div>
+                        <table className="premium-table">
+                            <thead>
+                                <tr>
+                                    <th>Grupo</th>
+                                    <th>Cargo</th>
+                                    <th>Fecha</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {selectedUserRoles.roles.map(role => (
+                                    <tr key={role.id}>
+                                        <td>{role.grupo_nombre}</td>
+                                        <td><ContextRoleBadge role={role.relacion} /></td>
+                                        <td>{role.fecha_creacion ? new Date(role.fecha_creacion).toLocaleDateString() : '-'}</td>
+                                    </tr>
+                                ))}
+                                {selectedUserRoles.roles.length === 0 && (
+                                    <tr><td colSpan="3" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Este usuario no tiene cargos activos en aulas.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
@@ -570,10 +1305,10 @@ const AdminDashboard = () => {
             {showGroupModal && (
                 <div className="modal-overlay">
                     <div className="modal-content">
-                        <div className="card-header"><h2>Crear Nuevo Grupo</h2><button onClick={() => setShowGroupModal(false)} className="action-btn"><X size={20} /></button></div>
+                        <div className="card-header"><h2>Crear Nueva Clase/Materia</h2><button onClick={() => setShowGroupModal(false)} className="action-btn"><X size={20} /></button></div>
                         <form onSubmit={crearGrupo}>
                             <div className="form-group">
-                                <label className="form-label">Nombre del Grupo</label>
+                                <label className="form-label">Nombre de la clase/materia</label>
                                 <input type="text" className="form-input" required placeholder="Ej: Matemáticas 101" onChange={(e) => setNewGroup({...newGroup, nombre: e.target.value})} />
                             </div>
                             <div className="form-group">
@@ -581,13 +1316,13 @@ const AdminDashboard = () => {
                                 <input type="text" className="form-input" placeholder="Opcional" onChange={(e) => setNewGroup({...newGroup, descripcion: e.target.value})} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Asignar Profesor Tutor</label>
+                                <label className="form-label">Profesor titular</label>
                                 <select className="form-select" required onChange={(e) => setNewGroup({...newGroup, id_profesor: e.target.value})}>
                                     <option value="">-- Elige un profesor --</option>
                                     {profesores.map(p => <option key={p.id} value={p.id}>{p.email}</option>)}
                                 </select>
                             </div>
-                            <button type="submit" className="action-btn" style={{ background: 'var(--primary-color)', color: 'white', width: '100%' }}>Crear Grupo</button>
+                            <button type="submit" className="action-btn" style={{ background: 'var(--primary-color)', color: 'white', width: '100%' }}>Crear clase/materia</button>
                         </form>
                     </div>
                 </div>

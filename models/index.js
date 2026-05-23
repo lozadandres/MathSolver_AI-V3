@@ -10,6 +10,12 @@ import Permiso from './Permiso.js';
 import RolPermiso from './RolPermiso.js';
 import UsuarioGrupo from './UsuarioGrupo.js';
 import TipoRol from './TipoRol.js';
+import LogAuditoria from './LogAuditoria.js';
+import Politica from './Politica.js';
+import ClienteAcceso from './ClienteAcceso.js';
+import LogAccion from './LogAccion.js';
+import LogSesion from './LogSesion.js';
+import Documento from './Documento.js';
 
 // ---- Asociaciones (Relaciones) ----
 
@@ -36,6 +42,8 @@ Configuracion.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario_config
 // Usuario (Profesor) -> CodigosInvitacion
 Usuario.hasMany(CodigoInvitacion, { foreignKey: 'id_profesor', as: 'codigos' });
 CodigoInvitacion.belongsTo(Usuario, { foreignKey: 'id_profesor', as: 'profesor' });
+CodigoInvitacion.belongsTo(Grupo, { foreignKey: 'id_grupo', as: 'grupo' });
+Grupo.hasMany(CodigoInvitacion, { foreignKey: 'id_grupo', as: 'codigos_invitacion' });
 
 // ---- NUEVAS RELACIONES ----
 
@@ -51,6 +59,30 @@ Grupo.belongsTo(Usuario, { foreignKey: 'id_profesor', as: 'tutor' });
 Usuario.belongsToMany(Grupo, { through: UsuarioGrupo, foreignKey: 'id_usuario', as: 'mis_grupos' });
 Grupo.belongsToMany(Usuario, { through: UsuarioGrupo, foreignKey: 'id_grupo', as: 'integrantes' });
 
+// Usuario -> Logs de Auditoria
+Usuario.hasMany(LogAuditoria, { foreignKey: 'id_usuario', as: 'logs_auditoria' });
+LogAuditoria.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario' });
+
+// Usuario -> Clientes, acciones y sesiones
+Usuario.hasMany(ClienteAcceso, { foreignKey: 'id_usuario', as: 'clientes_acceso' });
+ClienteAcceso.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario' });
+Usuario.hasMany(LogAccion, { foreignKey: 'id_usuario', as: 'logs_acciones' });
+LogAccion.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario' });
+ClienteAcceso.hasMany(LogAccion, { foreignKey: 'id_cliente', as: 'acciones' });
+LogAccion.belongsTo(ClienteAcceso, { foreignKey: 'id_cliente', as: 'cliente' });
+Usuario.hasMany(LogSesion, { foreignKey: 'id_usuario', as: 'logs_sesiones' });
+LogSesion.belongsTo(Usuario, { foreignKey: 'id_usuario', as: 'usuario' });
+ClienteAcceso.hasMany(LogSesion, { foreignKey: 'id_cliente', as: 'sesiones' });
+LogSesion.belongsTo(ClienteAcceso, { foreignKey: 'id_cliente', as: 'cliente' });
+Token.hasMany(LogSesion, { foreignKey: 'id_token', as: 'logs_sesiones' });
+LogSesion.belongsTo(Token, { foreignKey: 'id_token', as: 'token' });
+
+// Documentos de clase
+Grupo.hasMany(Documento, { foreignKey: 'id_grupo', as: 'documentos' });
+Documento.belongsTo(Grupo, { foreignKey: 'id_grupo', as: 'grupo' });
+Usuario.hasMany(Documento, { foreignKey: 'id_usuario_creador', as: 'documentos_creados' });
+Documento.belongsTo(Usuario, { foreignKey: 'id_usuario_creador', as: 'creador' });
+
 export {
   sequelize,
   Usuario,
@@ -63,5 +95,11 @@ export {
   Permiso,
   RolPermiso,
   UsuarioGrupo,
-  TipoRol
+  TipoRol,
+  LogAuditoria,
+  Politica,
+  ClienteAcceso,
+  LogAccion,
+  LogSesion,
+  Documento
 };
