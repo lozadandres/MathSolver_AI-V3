@@ -17,18 +17,17 @@ MathSolver AI es una plataforma educativa para resolver, explicar y practicar ma
 
 ## Capturas de la version actual
 
-Guarda las capturas nuevas en `docs/images/` con estos nombres para que se vean directamente en GitHub.
-
 | Vista | Captura |
 |---|---|
-| Panel Admin - Usuarios | ![Panel Admin Usuarios](docs/images/admin-usuarios.png) |
-| Panel Admin - Clases / Materias | ![Panel Admin Clases](docs/images/admin-clases.png) |
-| Panel Admin - Perfiles y Permisos | ![Panel Admin Permisos](docs/images/admin-permisos.png) |
-| Panel Admin - Analiticas | ![Panel Admin Analiticas](docs/images/admin-analiticas.png) |
-| Panel Profesor | ![Panel Profesor](docs/images/profesor-panel.png) |
-| Panel Profesor - Codigos y Alumnos | ![Panel Profesor Codigos](docs/images/profesor-codigos-alumnos.png) |
-| Panel Estudiante | ![Panel Estudiante](docs/images/estudiante-panel.png) |
-| Chat de Clase | ![Chat de Clase](docs/images/chat-clase.png) |
+| Panel Admin - Usuarios | ![Panel Admin Usuarios](frontend/public/PanelAdmin_Usuarios.jpeg) |
+| Panel Admin - Clases / Materias | ![Panel Admin Clases](frontend/public/PanelAdmin_Clases.jpeg) |
+| Panel Admin - Perfiles y Permisos | ![Panel Admin Permisos](frontend/public/PanelAdmin_Perfiles_and_Permisos.jpeg) |
+| Panel Admin - Analiticas | ![Panel Admin Analiticas](frontend/public/PanelAdmin_Analiticas.jpeg) |
+| Panel Profesor | ![Panel Profesor](frontend/public/PanelProfesor.jpeg) |
+| Panel Profesor con permiso revocado | ![Panel Profesor con permiso revocado](frontend/public/PanelProfesor_revocadoPermiso.jpeg) |
+| Revocar permiso de gestion de grupos | ![Revocar permiso Gestion Grupos](frontend/public/revocarPermiso_GestionGrupos.jpeg) |
+| Panel Estudiante | ![Panel Estudiante](frontend/public/PanelEstudiante.jpeg) |
+| Chat de Clase | ![Chat de Clase](frontend/public/ChatClase.jpeg) |
 
 ## Capturas historicas del chat matematico
 
