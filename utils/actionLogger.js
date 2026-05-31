@@ -29,7 +29,8 @@ export const logAction = async (req, {
             descripcion,
             metadata,
             ip_address: getIpAddress(req),
-            user_agent: req?.headers?.['user-agent'] || null
+            user_agent: req?.headers?.['user-agent'] || null,
+            fecha_creacion: new Date()
         });
     } catch (error) {
         console.error('Error registrando accion:', error);

@@ -1,15 +1,23 @@
 import { Fragment, useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
-import { Users, Shield, LogOut, Trash2, X, LayoutGrid, Key, Plus, FileText, AlertTriangle, Activity, Bot, CheckCircle, Lock, Edit3, BarChart3, PieChart, TrendingUp } from 'lucide-react';
+import { Users, Shield, LogOut, Trash2, X, LayoutGrid, Key, Plus, FileText, AlertTriangle, Activity, Bot, CheckCircle, Lock, Edit3, BarChart3, PieChart, TrendingUp, Settings } from 'lucide-react';
 import ContextRoleBadge from '../components/ContextRoleBadge';
 import ReBACManagementModal from '../components/ReBACManagementModal';
+import SettingsModal from '../components/SettingsModal';
+import ProfileAvatar from '../components/ProfileAvatar';
+import TablePagination from '../components/TablePagination';
+import SortableHeader from '../components/SortableHeader';
+import usePagination from '../hooks/usePagination';
+import useTableSort from '../hooks/useTableSort';
+import useTableFilter from '../hooks/useTableFilter';
 import '../styles/Dashboards.css';
 
 const AdminDashboard = () => {
     const { user, logout, theme, toggleTheme } = useAuth();
     const [activeTab, setActiveTab] = useState('usuarios');
     const [loading, setLoading] = useState(true);
+    const [showSettings, setShowSettings] = useState(false);
 
     // Estados para Usuarios
     const [usuarios, setUsuarios] = useState([]);
@@ -39,6 +47,8 @@ const AdminDashboard = () => {
     const [sessionLogs, setSessionLogs] = useState([]);
     const [logStats, setLogStats] = useState({ totalAcciones: 0, accionesFallidas: 0, sesionesActivas: 0, consultasIA: 0 });
     const [auditFilters, setAuditFilters] = useState({ fecha: 'semana', seccion: '', nivel: '', id_usuario: '', categoria: '', exito: '', accion: '' });
+    const [activeLogTab, setActiveLogTab] = useState('acciones');
+    const [tableFilters, setTableFilters] = useState({ usuarios: '', grupos: '', roles: '' });
     const [selectedAuditLog, setSelectedAuditLog] = useState(null);
     const [selectedUserRoles, setSelectedUserRoles] = useState(null);
     const [chartTooltip, setChartTooltip] = useState(null);
@@ -56,9 +66,9 @@ const AdminDashboard = () => {
                 api.get('/admin/roles'),
                 api.get('/admin/permisos'),
                 api.get('/admin/tipo-roles'),
-                api.get('/admin/logs/auditoria').catch(() => ({ data: [] })),
-                api.get('/admin/logs/acciones').catch(() => ({ data: [] })),
-                api.get('/admin/logs/sesiones').catch(() => ({ data: [] })),
+                api.get('/admin/logs/auditoria?limit=500').catch(() => ({ data: [] })),
+                api.get('/admin/logs/acciones?limit=500').catch(() => ({ data: [] })),
+                api.get('/admin/logs/sesiones?limit=500').catch(() => ({ data: [] })),
                 api.get('/admin/logs/stats').catch(() => ({ data: { totalAcciones: 0, accionesFallidas: 0, sesionesActivas: 0, consultasIA: 0 } }))
             ]);
             setUsuarios(resUsers.data);
@@ -83,6 +93,7 @@ const AdminDashboard = () => {
             Object.entries(filters).forEach(([key, value]) => {
                 if (value) params.append(key, value);
             });
+            params.set('limit', '500');
             const res = await api.get(`/admin/logs/auditoria?${params.toString()}`);
             const resActions = await api.get(`/admin/logs/acciones?${params.toString()}`).catch(() => ({ data: [] }));
             const resSessions = await api.get(`/admin/logs/sesiones?${params.toString()}`).catch(() => ({ data: [] }));
@@ -276,6 +287,17 @@ const AdminDashboard = () => {
 
     const profesores = usuarios.filter(u => u.role === 'Profesor');
     const usuariosAsignables = usuarios.filter(u => u.role !== 'Admin');
+    const formatLogDate = (value) => value ? new Date(value).toLocaleString() : 'Sin fecha';
+    const getGrupoTutorLabel = (grupo) => {
+        if (grupo.profesor?.email) return grupo.profesor.email;
+
+        const roles = grupo.roles_contextuales || groupContextRoles[grupo.id] || [];
+        const principal = roles.find(role => role.relacion === 'director_grupo')
+            || roles.find(role => role.relacion === 'tutor_asistente')
+            || roles.find(role => role.relacion === 'profesor_materia');
+
+        return principal?.email || null;
+    };
     const countBy = (items, getKey) => items.reduce((acc, item) => {
         const key = getKey(item) || 'Sin dato';
         acc[key] = (acc[key] || 0) + 1;
@@ -321,6 +343,74 @@ const AdminDashboard = () => {
         { label: 'Sesiones activas', value: activeSessions, color: '#10b981' },
         { label: 'Tasa de fallos', value: `${failureRate}%`, color: failureRate > 20 ? '#ef4444' : '#10b981' }
     ];
+    const setTableFilter = (key, value) => setTableFilters((current) => ({ ...current, [key]: value }));
+    const filteredUsuarios = useTableFilter(usuarios, tableFilters.usuarios, [
+        (item) => item.email,
+        (item) => item.role,
+        (item) => item.bloqueado ? 'Bloqueado' : 'Activo'
+    ]);
+    const filteredAdminGroups = useTableFilter(grupos, tableFilters.grupos, [
+        (item) => item.nombre,
+        (item) => item.descripcion,
+        (item) => getGrupoTutorLabel(item),
+        (item) => item.activo ? 'Activo' : 'Inactivo'
+    ]);
+    const filteredRoles = useTableFilter(roles, tableFilters.roles, [
+        (item) => item.nombre,
+        (item) => item.descripcion,
+        (item) => item.tipo,
+        (item) => item.activo !== false ? 'Activo' : 'Inactivo'
+    ]);
+    const usuariosSort = useTableSort(filteredUsuarios, 'email', 'asc', {
+        email: (item) => item.email,
+        perfil: (item) => item.role,
+        estado: (item) => item.bloqueado ? 'Bloqueado' : 'Activo'
+    });
+    const gruposSort = useTableSort(filteredAdminGroups, 'nombre', 'asc', {
+        nombre: (item) => item.nombre,
+        descripcion: (item) => item.descripcion,
+        tutor: (item) => getGrupoTutorLabel(item),
+        estado: (item) => item.activo ? 'Activo' : 'Inactivo'
+    });
+    const rolesSort = useTableSort(filteredRoles, 'nombre', 'asc', {
+        nombre: (item) => item.nombre,
+        descripcion: (item) => item.descripcion,
+        tipo: (item) => item.tipo,
+        permisos: (item) => item.permisos?.length || 0,
+        estado: (item) => item.activo !== false ? 'Activo' : 'Inactivo'
+    });
+    const actionLogsSort = useTableSort(actionLogs, 'fecha', 'desc', {
+        fecha: (item) => item.fecha_creacion,
+        resultado: (item) => item.resultado,
+        seccion: (item) => item.seccion,
+        accion: (item) => item.accion,
+        usuario: (item) => item.usuario?.email || item.id_usuario || 'Sistema',
+        cliente: (item) => item.cliente ? `${item.cliente.navegador} ${item.cliente.sistema_operativo}` : '',
+        descripcion: (item) => item.descripcion
+    });
+    const sessionLogsSort = useTableSort(sessionLogs, 'inicio', 'desc', {
+        inicio: (item) => item.fecha_inicio,
+        fin: (item) => item.fecha_fin,
+        estado: (item) => item.estado,
+        usuario: (item) => item.usuario?.email || item.id_usuario,
+        dispositivo: (item) => item.cliente?.dispositivo,
+        navegador: (item) => item.cliente ? `${item.cliente.navegador} ${item.cliente.sistema_operativo}` : '',
+        ip: (item) => item.ip_address
+    });
+    const auditLogsSort = useTableSort(auditLogs, 'fecha', 'desc', {
+        fecha: (item) => item.fecha_creacion,
+        nivel: (item) => item.nivel,
+        seccion: (item) => item.seccion,
+        accion: (item) => item.accion,
+        usuario: (item) => item.usuario?.email || item.id_usuario || 'Sistema',
+        descripcion: (item) => item.descripcion
+    });
+    const usuariosPagination = usePagination(usuariosSort.sortedItems, 5, `${activeTab}-${usuariosSort.sortKey}-${usuariosSort.direction}`);
+    const gruposPagination = usePagination(gruposSort.sortedItems, 5, `${activeTab}-${gruposSort.sortKey}-${gruposSort.direction}`);
+    const rolesPagination = usePagination(rolesSort.sortedItems, 5, `${activeTab}-${rolesSort.sortKey}-${rolesSort.direction}`);
+    const actionLogsPagination = usePagination(actionLogsSort.sortedItems, 5, `${activeLogTab}-${auditFilters.fecha}-${auditFilters.categoria}-${auditFilters.exito}-${auditFilters.nivel}-${auditFilters.id_usuario}-${auditFilters.accion}-${actionLogsSort.sortKey}-${actionLogsSort.direction}`);
+    const sessionLogsPagination = usePagination(sessionLogsSort.sortedItems, 5, `${activeLogTab}-${auditFilters.fecha}-${auditFilters.id_usuario}-${sessionLogsSort.sortKey}-${sessionLogsSort.direction}`);
+    const auditLogsPagination = usePagination(auditLogsSort.sortedItems, 5, `${activeLogTab}-${auditFilters.fecha}-${auditFilters.seccion}-${auditFilters.nivel}-${auditFilters.id_usuario}-${auditLogsSort.sortKey}-${auditLogsSort.direction}`);
     const permisosPorRecurso = permisos.reduce((acc, permiso) => {
         const key = permiso.recurso || 'General';
         if (!acc[key]) acc[key] = [];
@@ -501,9 +591,13 @@ const AdminDashboard = () => {
                     <h1 style={{ fontSize: '2rem' }}>Panel de Administración</h1>
                 </div>
                 <div className="dashboard-header-right">
+                    <ProfileAvatar user={user} size={42} />
                     <div className="user-badge">Admin: {user?.email}</div>
                     <button onClick={toggleTheme} className="action-btn">
                         {theme === 'dark' ? '☀️' : '🌙'}
+                    </button>
+                    <button onClick={() => setShowSettings(true)} className="action-btn">
+                        <Settings size={18} /> Ajustes
                     </button>
                     <button onClick={logout} className="action-btn logout-btn">
                         <LogOut size={18} /> Salir
@@ -531,7 +625,6 @@ const AdminDashboard = () => {
 
             {loading ? <p>Cargando panel...</p> : (
                 <>
-                    {/* SECCIÓN USUARIOS */}
                     {activeTab === 'usuarios' && (
                         <div className="glass-card">
                             <div className="card-header">
@@ -542,17 +635,25 @@ const AdminDashboard = () => {
                                     </button>
                                 </div>
                             </div>
+                            <div className="table-filter-row">
+                                <input
+                                    className="form-input"
+                                    placeholder="Filtrar usuarios"
+                                    value={tableFilters.usuarios}
+                                    onChange={(e) => setTableFilter('usuarios', e.target.value)}
+                                />
+                            </div>
                             <table className="premium-table">
                                 <thead>
                                     <tr>
-                                        <th>Email</th>
-                                        <th>Perfil</th>
-                                        <th>Estado</th>
+                                        <SortableHeader label="Email" sortKey="email" sort={usuariosSort} />
+                                        <SortableHeader label="Perfil" sortKey="perfil" sort={usuariosSort} />
+                                        <SortableHeader label="Estado" sortKey="estado" sort={usuariosSort} />
                                         <th>Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {usuarios.map(u => (
+                                    {usuariosPagination.pageItems.map(u => (
                                         <tr key={u.id}>
                                             <td style={{ fontWeight: '500' }}>{u.email}</td>
                                             <td>
@@ -577,8 +678,12 @@ const AdminDashboard = () => {
                                             </td>
                                         </tr>
                                     ))}
+                                    {filteredUsuarios.length === 0 && (
+                                        <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No hay usuarios para este filtro.</td></tr>
+                                    )}
                                 </tbody>
                             </table>
+                            <TablePagination pagination={usuariosPagination} />
                         </div>
                     )}
 
@@ -591,18 +696,26 @@ const AdminDashboard = () => {
                                     <Plus size={18} /> Crear Clase/Materia
                                 </button>
                             </div>
+                            <div className="table-filter-row">
+                                <input
+                                    className="form-input"
+                                    placeholder="Filtrar clases"
+                                    value={tableFilters.grupos}
+                                    onChange={(e) => setTableFilter('grupos', e.target.value)}
+                                />
+                            </div>
                             <table className="premium-table">
                                 <thead>
                                     <tr>
-                                        <th>Clase / Materia</th>
-                                        <th>Descripción</th>
-                                        <th>Tutor/Profesor</th>
-                                        <th>Estado</th>
+                                        <SortableHeader label="Clase / Materia" sortKey="nombre" sort={gruposSort} />
+                                        <SortableHeader label="Descripción" sortKey="descripcion" sort={gruposSort} />
+                                        <SortableHeader label="Tutor/Profesor" sortKey="tutor" sort={gruposSort} />
+                                        <SortableHeader label="Estado" sortKey="estado" sort={gruposSort} />
                                         <th>Miembros</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {grupos.map(g => (
+                                    {gruposPagination.pageItems.map(g => (
                                         <Fragment key={g.id}>
                                             <tr>
                                                 <td style={{ fontWeight: 'bold' }}>
@@ -612,7 +725,7 @@ const AdminDashboard = () => {
                                                     {g.nombre}
                                                 </td>
                                                 <td>{g.descripcion}</td>
-                                                <td>{g.profesor?.email || 'Sin tutor'}</td>
+                                                <td>{getGrupoTutorLabel(g) || 'Sin tutor'}</td>
                                                 <td><span className={`status-badge ${g.activo ? 'status-active' : 'status-inactive'}`}>{g.activo ? 'Activo' : 'Inactivo'}</span></td>
                                                 <td>
                                                     <button className="action-btn copy-btn" onClick={() => abrirGestionReBACAdmin(g)} title="Gestionar miembros">
@@ -643,9 +756,10 @@ const AdminDashboard = () => {
                                             )}
                                         </Fragment>
                                     ))}
-                                    {grupos.length === 0 && <tr><td colSpan="5" style={{textAlign: 'center', color: 'var(--text-muted)'}}>No hay clases/materias creadas.</td></tr>}
+                                    {filteredAdminGroups.length === 0 && <tr><td colSpan="5" style={{textAlign: 'center', color: 'var(--text-muted)'}}>No hay clases/materias para este filtro.</td></tr>}
                                 </tbody>
                             </table>
+                            <TablePagination pagination={gruposPagination} />
                         </div>
                     )}
 
@@ -818,19 +932,27 @@ const AdminDashboard = () => {
                                 <div className="card-header">
                                     <h3 className="card-title"><Shield size={20} color="var(--primary-color)" /> Perfiles del Sistema</h3>
                                 </div>
+                                <div className="table-filter-row">
+                                    <input
+                                        className="form-input"
+                                        placeholder="Filtrar perfiles"
+                                        value={tableFilters.roles}
+                                        onChange={(e) => setTableFilter('roles', e.target.value)}
+                                    />
+                                </div>
                                 <table className="premium-table">
                                     <thead>
                                         <tr>
-                                            <th>Nombre</th>
-                                            <th>Descripción</th>
-                                            <th>Tipo</th>
-                                            <th>Permisos</th>
-                                            <th>Estado</th>
+                                            <SortableHeader label="Nombre" sortKey="nombre" sort={rolesSort} />
+                                            <SortableHeader label="Descripción" sortKey="descripcion" sort={rolesSort} />
+                                            <SortableHeader label="Tipo" sortKey="tipo" sort={rolesSort} />
+                                            <SortableHeader label="Permisos" sortKey="permisos" sort={rolesSort} />
+                                            <SortableHeader label="Estado" sortKey="estado" sort={rolesSort} />
                                             <th>Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {roles.map(r => (
+                                        {rolesPagination.pageItems.map(r => (
                                             <tr key={r.id}>
                                                 <td style={{ fontWeight: 'bold' }}>{r.nombre}</td>
                                                 <td>{r.descripcion || 'Sin descripción'}</td>
@@ -871,8 +993,12 @@ const AdminDashboard = () => {
                                                 </td>
                                             </tr>
                                         ))}
+                                        {filteredRoles.length === 0 && (
+                                            <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No hay perfiles para este filtro.</td></tr>
+                                        )}
                                     </tbody>
                                 </table>
+                                <TablePagination pagination={rolesPagination} />
                             </div>
 
                             <div className="glass-card permission-matrix-card">
@@ -998,27 +1124,41 @@ const AdminDashboard = () => {
                                 <input className="form-input" placeholder="Buscar accion" value={auditFilters.accion} onChange={(e) => cambiarFiltroAuditoria('accion', e.target.value)} />
                             </div>
 
+                            <div className="segmented-filter" style={{ marginBottom: '1.25rem' }}>
+                                <button className={activeLogTab === 'acciones' ? 'active' : ''} onClick={() => setActiveLogTab('acciones')}>
+                                    Logs de Acciones ({actionLogs.length})
+                                </button>
+                                <button className={activeLogTab === 'sesiones' ? 'active' : ''} onClick={() => setActiveLogTab('sesiones')}>
+                                    Logs de Sesiones ({sessionLogs.length})
+                                </button>
+                                <button className={activeLogTab === 'legacy' ? 'active' : ''} onClick={() => setActiveLogTab('legacy')}>
+                                    Auditoria Legacy ({auditLogs.length})
+                                </button>
+                            </div>
+
+                            {activeLogTab === 'acciones' && (
+                            <>
                             <h3 className="card-title" style={{ marginTop: '1rem' }}>Logs de Acciones</h3>
-                            <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+                            <div style={{ overflowX: 'auto' }}>
                                 <table className="premium-table">
                                     <thead>
                                         <tr>
-                                            <th>Fecha</th>
-                                            <th>Resultado</th>
-                                            <th>Sección</th>
-                                            <th>Acción</th>
-                                            <th>Usuario</th>
-                                            <th>Cliente</th>
-                                            <th>Descripción</th>
+                                            <SortableHeader label="Fecha" sortKey="fecha" sort={actionLogsSort} />
+                                            <SortableHeader label="Resultado" sortKey="resultado" sort={actionLogsSort} />
+                                            <SortableHeader label="Sección" sortKey="seccion" sort={actionLogsSort} />
+                                            <SortableHeader label="Acción" sortKey="accion" sort={actionLogsSort} />
+                                            <SortableHeader label="Usuario" sortKey="usuario" sort={actionLogsSort} />
+                                            <SortableHeader label="Cliente" sortKey="cliente" sort={actionLogsSort} />
+                                            <SortableHeader label="Descripción" sortKey="descripcion" sort={actionLogsSort} />
                                             <th>Detalle</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {actionLogs.map(log => {
+                                        {actionLogsPagination.pageItems.map(log => {
                                             const visual = actionVisual(log);
                                             return (
                                             <tr key={log.id} style={{ background: log.resultado === 'DENIED' || log.resultado === 'FAILED' ? 'rgba(239, 68, 68, 0.06)' : 'transparent' }}>
-                                                <td>{new Date(log.fecha_creacion).toLocaleString()}</td>
+                                                <td>{formatLogDate(log.fecha_creacion)}</td>
                                                 <td>
                                                     <span className={`status-badge ${log.resultado === 'DENIED' || log.resultado === 'FAILED' ? 'status-inactive' : 'status-active'}`}>
                                                         {log.resultado}
@@ -1043,26 +1183,31 @@ const AdminDashboard = () => {
                                     </tbody>
                                 </table>
                             </div>
+                            <TablePagination pagination={actionLogsPagination} />
+                            </>
+                            )}
 
+                            {activeLogTab === 'sesiones' && (
+                            <>
                             <h3 className="card-title">Logs de Sesiones</h3>
-                            <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+                            <div style={{ overflowX: 'auto' }}>
                                 <table className="premium-table">
                                     <thead>
                                         <tr>
-                                            <th>Inicio</th>
-                                            <th>Fin</th>
-                                            <th>Estado</th>
-                                            <th>Usuario</th>
-                                            <th>Dispositivo</th>
-                                            <th>Navegador</th>
-                                            <th>IP</th>
+                                            <SortableHeader label="Inicio" sortKey="inicio" sort={sessionLogsSort} />
+                                            <SortableHeader label="Fin" sortKey="fin" sort={sessionLogsSort} />
+                                            <SortableHeader label="Estado" sortKey="estado" sort={sessionLogsSort} />
+                                            <SortableHeader label="Usuario" sortKey="usuario" sort={sessionLogsSort} />
+                                            <SortableHeader label="Dispositivo" sortKey="dispositivo" sort={sessionLogsSort} />
+                                            <SortableHeader label="Navegador" sortKey="navegador" sort={sessionLogsSort} />
+                                            <SortableHeader label="IP" sortKey="ip" sort={sessionLogsSort} />
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {sessionLogs.map(session => (
+                                        {sessionLogsPagination.pageItems.map(session => (
                                             <tr key={session.id}>
-                                                <td>{new Date(session.fecha_inicio).toLocaleString()}</td>
-                                                <td>{session.fecha_fin ? new Date(session.fecha_fin).toLocaleString() : '-'}</td>
+                                                <td>{formatLogDate(session.fecha_inicio)}</td>
+                                                <td>{session.fecha_fin ? formatLogDate(session.fecha_fin) : '-'}</td>
                                                 <td><span className={`status-badge ${session.estado === 'ACTIVA' ? 'status-active' : 'status-inactive'}`}>{session.estado}</span></td>
                                                 <td>{session.usuario?.email || `Usuario #${session.id_usuario}`}</td>
                                                 <td>{session.cliente?.dispositivo || '-'}</td>
@@ -1076,25 +1221,31 @@ const AdminDashboard = () => {
                                     </tbody>
                                 </table>
                             </div>
+                            <TablePagination pagination={sessionLogsPagination} />
 
+                            </>
+                            )}
+
+                            {activeLogTab === 'legacy' && (
+                            <>
                             <h3 className="card-title">Auditoría Legacy</h3>
                             <div style={{ overflowX: 'auto' }}>
                                 <table className="premium-table">
                                     <thead>
                                         <tr>
-                                            <th>Fecha</th>
-                                            <th>Nivel</th>
-                                            <th>Sección</th>
-                                            <th>Acción</th>
-                                            <th>Usuario</th>
-                                            <th>Descripción</th>
+                                            <SortableHeader label="Fecha" sortKey="fecha" sort={auditLogsSort} />
+                                            <SortableHeader label="Nivel" sortKey="nivel" sort={auditLogsSort} />
+                                            <SortableHeader label="Sección" sortKey="seccion" sort={auditLogsSort} />
+                                            <SortableHeader label="Acción" sortKey="accion" sort={auditLogsSort} />
+                                            <SortableHeader label="Usuario" sortKey="usuario" sort={auditLogsSort} />
+                                            <SortableHeader label="Descripción" sortKey="descripcion" sort={auditLogsSort} />
                                             <th>Detalle</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {auditLogs.map(log => (
+                                        {auditLogsPagination.pageItems.map(log => (
                                             <tr key={log.id}>
-                                                <td>{new Date(log.fecha_creacion).toLocaleString()}</td>
+                                                <td>{formatLogDate(log.fecha_creacion)}</td>
                                                 <td>
                                                     <span className={`status-badge ${log.nivel === 'danger' ? 'status-inactive' : 'status-active'}`}>
                                                         {log.nivel}
@@ -1117,6 +1268,9 @@ const AdminDashboard = () => {
                                     </tbody>
                                 </table>
                             </div>
+                            <TablePagination pagination={auditLogsPagination} />
+                            </>
+                            )}
                         </div>
                     )}
                     {/* Modal Crear/Editar Usuario */}
@@ -1239,6 +1393,8 @@ const AdminDashboard = () => {
                     )}
                 </>
             )}
+
+            {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
             {selectedAuditLog && (
                 <div className="modal-overlay">

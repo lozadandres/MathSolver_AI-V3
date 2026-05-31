@@ -15,6 +15,7 @@ export const UserDTO = (user) => {
         roleId: user.id_rol,
         activo: user.activo,
         bloqueado: user.bloqueado,
+        avatarUrl: user.avatar_url || null,
         configuracion: user.configuracion || null,
         permissions
     };
@@ -25,6 +26,10 @@ export const UserDTO = (user) => {
  */
 export const GroupDTO = (group) => {
     if (!group) return null;
+    const contextualTutor = (group.roles_contextuales || []).find(role => role.relacion === 'director_grupo')
+        || (group.roles_contextuales || []).find(role => role.relacion === 'tutor_asistente')
+        || (group.roles_contextuales || []).find(role => role.relacion === 'profesor_materia');
+
     return {
         id: group.id_grupo,
         nombre: group.nombre,
@@ -33,7 +38,8 @@ export const GroupDTO = (group) => {
         activo: group.activo,
         profesor: group.tutor ? {
             email: group.tutor.email
-        } : null,
+        } : (contextualTutor?.email ? { email: contextualTutor.email } : null),
+        roles_contextuales: group.roles_contextuales || [],
         roles_en_grupo: group.roles_en_grupo || [],
         integrantes: group.integrantes ? group.integrantes.map(i => ({
             id: i.id_usuario,

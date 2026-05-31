@@ -107,24 +107,42 @@ export const AuthProvider = ({ children }) => {
 
     const toggleTheme = async () => {
         const newTheme = theme === 'dark' ? 'light' : 'dark';
-        setTheme(newTheme);
-        document.documentElement.setAttribute('data-theme', newTheme);
-        
+        await updateConfiguration({ tema: newTheme });
+    };
+
+    const updateConfiguration = async (changes) => {
+        const nextConfig = {
+            ...(user?.configuracion || {}),
+            ...changes
+        };
+
+        if (changes.tema) {
+            setTheme(changes.tema);
+            document.documentElement.setAttribute('data-theme', changes.tema);
+        }
+
         if (user) {
-            const updatedUser = { 
-                ...user, 
-                configuracion: { ...(user.configuracion || {}), tema: newTheme } 
-            };
+            const updatedUser = { ...user, configuracion: nextConfig };
             setUser(updatedUser);
             localStorage.setItem('user', JSON.stringify(updatedUser));
-            
+
             try {
-                // Guarda en BD
-                await api.put('/auth/configuracion', { tema: newTheme });
+                const response = await api.put('/auth/configuracion', changes);
+                const savedConfig = response.data.configuracion || nextConfig;
+                const syncedUser = response.data.user || { ...updatedUser, configuracion: savedConfig };
+                setUser(syncedUser);
+                localStorage.setItem('user', JSON.stringify(syncedUser));
+                return { success: true, configuracion: savedConfig };
             } catch (e) {
-                console.error("No se pudo sincronizar el tema con la base de datos", e);
+                console.error("No se pudo sincronizar la configuracion con la base de datos", e);
+                return {
+                    success: false,
+                    error: e.response?.data?.error || 'No se pudo guardar la configuracion'
+                };
             }
         }
+
+        return { success: true, configuracion: nextConfig };
     };
 
     const hasPermission = (permission) => {
@@ -141,7 +159,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, register, theme, toggleTheme, hasPermission }}>
+        <AuthContext.Provider value={{ user, setUser, isAuthenticated: !!user, isLoading, login, logout, register, theme, setTheme, toggleTheme, updateConfiguration, hasPermission }}>
             {children}
         </AuthContext.Provider>
     );

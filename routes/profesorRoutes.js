@@ -172,6 +172,82 @@ router.get('/codigos', requireAuth, requirePermission('CODIGOS_GESTIONAR'), asyn
     }
 });
 
+// Editar codigo de invitacion sin cambiar el texto del codigo ya compartido
+router.put('/codigo/:id', requireAuth, requirePermission('CODIGOS_GESTIONAR'), async (req, res) => {
+    try {
+        const { id_grupo, usos_maximos, activo, fecha_expiracion } = req.body;
+        const codigo = await CodigoInvitacion.findOne({
+            where: { id_codigo: req.params.id, id_profesor: req.user.sub }
+        });
+
+        if (!codigo) return res.status(404).json({ error: 'Codigo no encontrado.' });
+
+        const nextGroupId = id_grupo ? parseInt(id_grupo, 10) : null;
+        if (nextGroupId && !await userHasGroupRole(req.user, nextGroupId, teacherGroupRoles)) {
+            await logActionWarning(req, {
+                accion: 'PROFESOR_UPDATE_CODE_DENIED',
+                seccion: 'PROFESOR',
+                resultado: 'DENIED',
+                descripcion: 'Profesor intento asociar codigo a una clase sin cargo contextual',
+                metadata: { id_codigo: codigo.id_codigo, id_grupo: nextGroupId }
+            });
+            return res.status(403).json({ error: 'No tienes rol contextual para asociar codigos a este grupo.' });
+        }
+
+        const nextMaxUses = usos_maximos === '' || usos_maximos === null || usos_maximos === undefined
+            ? null
+            : parseInt(usos_maximos, 10);
+
+        if (nextMaxUses !== null && (!Number.isInteger(nextMaxUses) || nextMaxUses < 1)) {
+            return res.status(400).json({ error: 'El limite de usos debe ser un numero mayor a cero.' });
+        }
+
+        if (nextMaxUses !== null && nextMaxUses < codigo.usos_actuales) {
+            return res.status(400).json({ error: `El limite no puede ser menor que los usos actuales (${codigo.usos_actuales}).` });
+        }
+
+        const before = codigo.get({ plain: true });
+        const updateData = {
+            id_grupo: nextGroupId,
+            usos_maximos: nextMaxUses
+        };
+
+        if (activo !== undefined) {
+            updateData.activo = activo === true || activo === 'true';
+        }
+
+        if (fecha_expiracion !== undefined) {
+            updateData.fecha_expiracion = fecha_expiracion || null;
+        }
+
+        await codigo.update(updateData);
+        await logActionWarning(req, {
+            accion: 'PROFESOR_UPDATE_CODE',
+            seccion: 'PROFESOR',
+            descripcion: `Profesor edito codigo ${codigo.codigo}`,
+            metadata: {
+                id_codigo: codigo.id_codigo,
+                codigo: codigo.codigo,
+                before: {
+                    id_grupo: before.id_grupo,
+                    usos_maximos: before.usos_maximos,
+                    activo: before.activo,
+                    fecha_expiracion: before.fecha_expiracion
+                },
+                changes: updateData
+            }
+        });
+
+        const updated = await CodigoInvitacion.findByPk(codigo.id_codigo, {
+            include: [{ model: Grupo, as: 'grupo', attributes: ['id_grupo', 'nombre'] }]
+        });
+        res.json(updated);
+    } catch (error) {
+        console.error('Error al editar codigo:', error);
+        res.status(500).json({ error: 'Error al editar codigo' });
+    }
+});
+
 // Eliminar (desactivar) código de invitación
 router.delete('/codigo/:id', requireAuth, requirePermission('CODIGOS_GESTIONAR'), async (req, res) => {
     try {

@@ -27,6 +27,10 @@ const Documento = sequelize.define('Documento', {
     allowNull: false,
     defaultValue: 'archivo'
   },
+  contenido: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
   archivo_url: {
     type: DataTypes.TEXT
   },

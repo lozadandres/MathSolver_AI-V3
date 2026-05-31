@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
-import { GraduationCap, Users, LogOut, Key, Plus, LayoutGrid, MessageSquare, BookOpen } from 'lucide-react';
+import { GraduationCap, Users, LogOut, Plus, LayoutGrid, BookOpen, Settings, FileText, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import SettingsModal from '../components/SettingsModal';
+import ProfileAvatar from '../components/ProfileAvatar';
+import TablePagination from '../components/TablePagination';
+import usePagination from '../hooks/usePagination';
+import useTableSort from '../hooks/useTableSort';
 import '../styles/Dashboards.css';
 
 const EstudianteDashboard = () => {
@@ -11,10 +16,26 @@ const EstudianteDashboard = () => {
     const [grupos, setGrupos] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showJoinModal, setShowJoinModal] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
     const [joinCode, setJoinCode] = useState('');
+    const [materialsGroup, setMaterialsGroup] = useState(null);
+    const [materials, setMaterials] = useState([]);
+    const [materialsLoading, setMaterialsLoading] = useState(false);
     const canJoinClasses = hasPermission('CLASES_UNIRSE');
     const canViewClasses = hasPermission('CLASES_VER');
     const canUseChat = hasPermission('CHAT_IA');
+    const gruposSort = useTableSort(grupos, 'nombre', 'asc', {
+        nombre: (item) => item.nombre,
+        profesor: (item) => item.profesor?.email,
+        descripcion: (item) => item.descripcion
+    });
+    const materialesSort = useTableSort(materials, 'titulo', 'asc', {
+        titulo: (item) => item.titulo,
+        tipo: (item) => item.tipo,
+        profesor: (item) => item.creador?.email
+    });
+    const gruposPagination = usePagination(gruposSort.sortedItems, 5, `${gruposSort.sortKey}-${gruposSort.direction}`);
+    const materialesPagination = usePagination(materialesSort.sortedItems, 5, `${materialsGroup?.id || ''}-${materialesSort.sortKey}-${materialesSort.direction}`);
 
     useEffect(() => {
         cargarDatos();
@@ -49,6 +70,34 @@ const EstudianteDashboard = () => {
         }
     };
 
+    const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api\/?$/, '');
+    const resolveFileUrl = (url) => {
+        if (!url) return null;
+        if (/^https?:\/\//i.test(url)) return url;
+        return `${apiOrigin}${url.startsWith('/') ? url : `/${url}`}`;
+    };
+
+    const getProfesorGrupo = (grupo) => {
+        const contextualTeacher = (grupo.roles_contextuales || []).find(role => role.relacion === 'director_grupo')
+            || (grupo.roles_contextuales || []).find(role => role.relacion === 'tutor_asistente')
+            || (grupo.roles_contextuales || []).find(role => role.relacion === 'profesor_materia');
+
+        return grupo.profesor?.email || contextualTeacher?.email || 'N/A';
+    };
+
+    const abrirMateriales = async (grupo) => {
+        setMaterialsGroup(grupo);
+        setMaterialsLoading(true);
+        try {
+            const res = await api.get(`/grupos/${grupo.id}/documentos`);
+            setMaterials(res.data);
+        } catch (error) {
+            alert(error.response?.data?.error || 'Error al cargar materiales');
+        } finally {
+            setMaterialsLoading(false);
+        }
+    };
+
     return (
         <div className="dashboard-container">
             <header className="dashboard-header">
@@ -57,9 +106,13 @@ const EstudianteDashboard = () => {
                     <h1 style={{ fontSize: '2rem' }}>Mi Panel de Aprendizaje</h1>
                 </div>
                 <div className="dashboard-header-right">
+                    <ProfileAvatar user={user} size={42} />
                     <div className="user-badge">Estudiante: {user?.email}</div>
                     <button onClick={toggleTheme} className="action-btn">
                         {theme === 'dark' ? '☀️' : '🌙'}
+                    </button>
+                    <button onClick={() => setShowSettings(true)} className="action-btn">
+                        <Settings size={18} /> Ajustes
                     </button>
                     <button onClick={logout} className="action-btn logout-btn">
                         <LogOut size={18} /> Salir
@@ -82,25 +135,33 @@ const EstudianteDashboard = () => {
                     </div>
 
                     {loading ? <p>Cargando tus clases...</p> : (
-                        <div className="permissions-grid">
-                            {grupos.map(g => (
-                                <div key={g.id} className="perm-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div style={{ fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--text-main)' }}>{g.nombre}</div>
+                        <div className="permissions-grid student-class-grid">
+                            {gruposPagination.pageItems.map(g => (
+                                <div key={g.id} className="perm-card student-class-card">
+                                    <div className="student-class-card-header">
+                                        <div className="student-class-title">{g.nombre}</div>
                                         <BookOpen size={20} color="var(--primary-color)" />
                                     </div>
                                     <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{g.descripcion || 'Sin descripción'}</div>
-                                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div><strong>Profesor:</strong> {g.profesor?.email || 'N/A'}</div>
-                                        {canUseChat && (
+                                    <div className="student-class-footer">
+                                        <div className="student-class-teacher"><strong>Profesor:</strong> {getProfesorGrupo(g)}</div>
+                                        <div className="student-class-actions">
                                             <button
-                                                onClick={() => navigate(`/chat/${g.id}`)}
+                                                onClick={() => abrirMateriales(g)}
                                                 className="action-btn"
-                                                style={{ background: 'var(--primary-color)', color: 'white', padding: '0.4rem 1rem', fontSize: '0.8rem' }}
                                             >
-                                                Entrar al Chat
+                                                <FileText size={14} /> Material
                                             </button>
-                                        )}
+                                            {canUseChat && (
+                                                <button
+                                                    onClick={() => navigate(`/chat/${g.id}`)}
+                                                    className="action-btn"
+                                                    style={{ background: 'var(--primary-color)', color: 'white' }}
+                                                >
+                                                    Entrar al Chat
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -111,6 +172,7 @@ const EstudianteDashboard = () => {
                                     <p style={{ fontSize: '0.8rem' }}>Pídele a tu profesor un código de invitación.</p>
                                 </div>
                             )}
+                            <TablePagination pagination={gruposPagination} />
                         </div>
                     )}
                 </div>
@@ -157,6 +219,62 @@ const EstudianteDashboard = () => {
                     </div>
                 </div>
             )}
+
+            {materialsGroup && (
+                <div className="modal-overlay">
+                    <div className="modal-content" style={{ maxWidth: 820 }}>
+                        <div className="card-header">
+                            <h2>Material de clase: {materialsGroup.nombre}</h2>
+                            <button onClick={() => setMaterialsGroup(null)} className="action-btn">
+                                <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
+                            </button>
+                        </div>
+
+                        {materialsLoading ? <p>Cargando materiales...</p> : (
+                            <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                {materialesPagination.pageItems.map(doc => (
+                                    <div key={doc.id} className="perm-card">
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+                                            <div>
+                                                <strong>{doc.titulo}</strong>
+                                                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{doc.descripcion || 'Sin descripcion'}</div>
+                                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                                                    <span className="status-badge">{doc.tipo}</span>
+                                                    {doc.creador?.email && <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Publicado por {doc.creador.email}</span>}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                {doc.archivo_url && (
+                                                    <a className="action-btn" href={resolveFileUrl(doc.archivo_url)} target="_blank" rel="noreferrer">
+                                                        <ExternalLink size={16} /> Abrir
+                                                    </a>
+                                                )}
+                                                {doc.tipo === 'enlace' && doc.contenido && (
+                                                    <a className="action-btn" href={doc.contenido} target="_blank" rel="noreferrer">
+                                                        <ExternalLink size={16} /> Abrir
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {(doc.tipo === 'texto' || doc.tipo === 'tarea') && doc.contenido && (
+                                            <p style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', marginBottom: 0 }}>{doc.contenido}</p>
+                                        )}
+                                    </div>
+                                ))}
+                                {materials.length === 0 && (
+                                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                                        <FileText size={40} style={{ opacity: 0.25, marginBottom: '0.75rem' }} />
+                                        <p>Esta clase aun no tiene materiales visibles.</p>
+                                    </div>
+                                )}
+                                <TablePagination pagination={materialesPagination} />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
         </div>
     );
 };

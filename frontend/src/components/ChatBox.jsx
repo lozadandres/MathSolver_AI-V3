@@ -10,9 +10,9 @@ import html2pdf from 'html2pdf.js';
 import MathCanvas from './MathCanvas';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import ProfileAvatar from './ProfileAvatar';
 import '../styles/ChatBox.css';
 import bot from '/public/avatars/bot.gif';
-import useravatar from '/public/avatars/user.png';
 
 const ChatBox = () => {
   const { user, logout, theme, toggleTheme, hasPermission } = useAuth();
@@ -21,6 +21,7 @@ const ChatBox = () => {
   const canUseChat = hasPermission('CHAT_IA');
   const canJoinClasses = hasPermission('CLASES_UNIRSE');
   const [groupInfo, setGroupInfo] = useState(null);
+  const [groupMaterialsCount, setGroupMaterialsCount] = useState(0);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('detallado');
@@ -93,6 +94,7 @@ const ChatBox = () => {
       cargarContextoGrupo();
     } else {
       setGroupInfo(null);
+      setGroupMaterialsCount(0);
     }
   }, [groupId]);
 
@@ -100,6 +102,8 @@ const ChatBox = () => {
     try {
       const res = await api.get(`/chat/context/${groupId}`);
       setGroupInfo(res.data);
+      const docs = await api.get(`/grupos/${groupId}/documentos`).catch(() => ({ data: [] }));
+      setGroupMaterialsCount(docs.data.length || 0);
       // No agregamos mensaje a setMessages para que se muestre el Welcome Screen limpio
     } catch (error) {
       console.error("Error cargando contexto:", error);
@@ -519,7 +523,11 @@ const ChatBox = () => {
               Volver
             </button>
           </div>
-          {groupInfo && <div className="group-badge">{groupInfo.nombre}</div>}
+          {groupInfo && (
+            <div className="group-badge">
+              {groupInfo.nombre} {groupMaterialsCount > 0 ? `Â· ${groupMaterialsCount} materiales` : ''}
+            </div>
+          )}
         </div>
         <div className="sidebar-content">
           <div className="history-section">
@@ -596,7 +604,7 @@ const ChatBox = () => {
         </div>
         <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span className="user-avatar" style={{ background: 'rgba(99, 102, 241, 0.2)', padding: '0.4rem', borderRadius: '50%' }}><img src={useravatar} alt="User" className="user-avatar" /></span>
+            <ProfileAvatar user={user} size={42} />
             <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <span className="user-name" style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'white' }}>{user?.email?.split('@')[0] || 'Usuario'}</span>
                 <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Rol: {user?.role || 'Estudiante'}</span>
@@ -694,7 +702,7 @@ const ChatBox = () => {
               {messages.map((msg, index) => (
                 <div key={index} className={`message-wrapper ${msg.type}`}>
                   <div className="message-icon">
-                    {msg.type === 'user' ? <img src={useravatar} alt="User" className="user-avatar" /> : <img src={bot} alt="Bot" className="bot-avatar" />}
+                    {msg.type === 'user' ? <ProfileAvatar user={user} size={36} /> : <img src={bot} alt="Bot" className="bot-avatar" />}
                   </div>
                     <div className="message-bubble" id={`message-${index}`}>
                       <ReactMarkdown 

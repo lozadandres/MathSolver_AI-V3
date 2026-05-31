@@ -20,9 +20,15 @@ test('student join route applies PBAC policies before joining a class', () => {
 
 test('document endpoint is no longer a demo route in app.js', () => {
   const source = read('app.js');
+  const routes = read('routes/documentoRoutes.js');
 
-  assert.match(source, /app\.use\('\/api\/documentos', documentoRoutes\)/);
+  assert.match(source, /app\.use\('\/api', documentoRoutes\)/);
   assert.doesNotMatch(source, /app\.get\('\/api\/documentos\/:id'/);
+  assert.match(routes, /router\.get\('\/grupos\/:id\/documentos'/);
+  assert.match(routes, /router\.post\('\/grupos\/:id\/documentos'/);
+  assert.match(routes, /router\.get\('\/documentos\/:id'/);
+  assert.match(routes, /router\.put\('\/documentos\/:id'/);
+  assert.match(routes, /router\.delete\('\/documentos\/:id'/);
 });
 
 test('RBAC and ReBAC denials are audited', () => {

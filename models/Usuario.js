@@ -24,6 +24,10 @@ const Usuario = sequelize.define('Usuario', {
     type: DataTypes.BOOLEAN,
     defaultValue: false
   },
+  avatar_url: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
   id_rol: {
     type: DataTypes.INTEGER,
     allowNull: true

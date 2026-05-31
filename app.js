@@ -3,6 +3,7 @@ import './config/env.js';
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import path from "path";
 import { sequelize } from "./models/index.js";
 
 // Rutas
@@ -24,6 +25,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Rutas de Autenticación y Roles
 app.use('/api/auth', authRoutes);
@@ -31,7 +33,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/profesor', profesorRoutes);
 app.use('/api/estudiante', estudianteRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api/documentos', documentoRoutes);
+app.use('/api', documentoRoutes);
 
 // Ejemplo de ruta protegida con modelo Híbrido (RBAC + ReBAC + ABAC)
 // requireAuth -> Verifica JWT Access Token

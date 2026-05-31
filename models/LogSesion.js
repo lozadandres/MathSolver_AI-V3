@@ -9,7 +9,7 @@ const LogSesion = sequelize.define('LogSesion', {
   },
   id_usuario: {
     type: DataTypes.INTEGER,
-    allowNull: false
+    allowNull: true
   },
   id_cliente: {
     type: DataTypes.INTEGER,

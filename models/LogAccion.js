@@ -54,6 +54,7 @@ const LogAccion = sequelize.define('LogAccion', {
   fecha_creacion: {
     type: DataTypes.DATE,
     allowNull: true,
+    defaultValue: DataTypes.NOW,
     field: 'fecha'
   }
 }, {

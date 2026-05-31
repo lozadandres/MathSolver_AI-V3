@@ -17,6 +17,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# User uploads
+uploads/*
+!uploads/.gitkeep
+!uploads/avatars/
+uploads/avatars/*
+!uploads/avatars/.gitkeep
+
 # OS files
 .DS_Store
 Thumbs.db

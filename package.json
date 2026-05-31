@@ -1,6 +1,8 @@
 {
   "type": "module",
   "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js",
     "test:security": "node --test tests/security.authorization.test.js"
   },
   "dependencies": {

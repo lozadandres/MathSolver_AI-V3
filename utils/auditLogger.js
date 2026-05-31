@@ -62,7 +62,8 @@ export const auditLog = async (req, {
             descripcion,
             metadata,
             ip_address: ipAddress,
-            user_agent: userAgent
+            user_agent: userAgent,
+            fecha_creacion: new Date()
         });
     } catch (error) {
         console.error('Error registrando auditoria:', error);

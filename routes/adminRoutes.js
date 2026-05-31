@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import { Op } from 'sequelize';
-import { Usuario, Rol, RelacionRecurso, Grupo, Permiso, RolPermiso, Configuracion, TipoRol, LogAuditoria, UsuarioGrupo, LogAccion, LogSesion, ClienteAcceso } from '../models/index.js';
+import { sequelize, Usuario, Rol, RelacionRecurso, Grupo, Permiso, RolPermiso, Configuracion, TipoRol, LogAuditoria, UsuarioGrupo, LogAccion, LogSesion, ClienteAcceso, Token, Documento } from '../models/index.js';
 import { requireAuth, requirePermission } from '../middleware/authMiddleware.js';
 import { UserDTO, GroupDTO, RoleDTO, PermissionDTO } from '../dtos/index.js';
 import { auditInfo, auditWarning, auditDanger } from '../utils/auditLogger.js';
@@ -49,6 +49,26 @@ const actionLogPayload = (log) => ({
     } : null
 });
 
+const legacyAsActionPayload = (log) => ({
+    id: `legacy-${log.id_log}`,
+    id_usuario: log.id_usuario,
+    id_cliente: null,
+    accion: log.accion,
+    seccion: log.seccion,
+    nivel: log.nivel,
+    resultado: log.nivel === 'danger' || String(log.accion).includes('DENIED') ? 'DENIED'
+        : String(log.accion).includes('FAILED') ? 'FAILED'
+        : 'SUCCESS',
+    descripcion: log.descripcion,
+    metadata: log.metadata,
+    ip_address: log.ip_address,
+    user_agent: log.user_agent,
+    fecha_creacion: log.fecha_creacion,
+    usuario: log.usuario ? { id: log.usuario.id_usuario, email: log.usuario.email } : null,
+    cliente: null,
+    origen: 'legacy'
+});
+
 const sessionLogPayload = (session) => ({
     id: session.id_log_sesion,
     id_usuario: session.id_usuario,
@@ -68,12 +88,21 @@ const sessionLogPayload = (session) => ({
     } : null
 });
 
-const applyDateFilter = (where, field, fecha = 'semana') => {
+const applyDateFilter = (where, field, fecha = 'semana', includeUndated = false) => {
     if (fecha === 'todo') return;
     const from = new Date();
     if (fecha === 'hoy') from.setHours(0, 0, 0, 0);
     else if (fecha === 'mes') from.setDate(from.getDate() - 30);
     else from.setDate(from.getDate() - 7);
+
+    if (includeUndated) {
+        where[Op.or] = [
+            { [field]: { [Op.gte]: from } },
+            { [field]: null }
+        ];
+        return;
+    }
+
     where[field] = { [Op.gte]: from };
 };
 
@@ -96,6 +125,8 @@ const applyActionCategoryFilter = (where, categoria) => {
 };
 
 // Auditoria y logs
+const getLogLimit = (limit) => Math.min(parseInt(limit, 10) || 500, 2000);
+
 router.get('/logs/auditoria', requireAuth, requirePermission('admin:logs:read'), async (req, res) => {
     try {
         const { seccion, nivel, id_usuario, fecha = 'semana', limit = 100 } = req.query;
@@ -117,7 +148,7 @@ router.get('/logs/auditoria', requireAuth, requirePermission('admin:logs:read'),
             where,
             include: [{ model: Usuario, as: 'usuario', attributes: ['id_usuario', 'email'] }],
             order: [['fecha_creacion', 'DESC']],
-            limit: Math.min(parseInt(limit, 10) || 100, 500)
+            limit: getLogLimit(limit)
         });
 
         res.json(logs.map(logPayload));
@@ -146,7 +177,7 @@ router.get('/logs/acciones', requireAuth, requirePermission('admin:logs:read'), 
                 { accion: { [Op.iLike]: `%${accion}%` } }
             ];
         }
-        applyDateFilter(where, 'fecha_creacion', fecha);
+        applyDateFilter(where, 'fecha_creacion', fecha, true);
 
         const logs = await LogAccion.findAll({
             where,
@@ -155,8 +186,33 @@ router.get('/logs/acciones', requireAuth, requirePermission('admin:logs:read'), 
                 { model: ClienteAcceso, as: 'cliente', attributes: ['id_cliente', 'dispositivo', 'navegador', 'sistema_operativo'] }
             ],
             order: [['fecha_creacion', 'DESC']],
-            limit: Math.min(parseInt(limit, 10) || 100, 500)
+            limit: getLogLimit(limit)
         });
+
+        if (logs.length === 0) {
+            const legacyWhere = {};
+            if (seccion) legacyWhere.seccion = seccion;
+            if (nivel) legacyWhere.nivel = nivel;
+            if (id_usuario) legacyWhere.id_usuario = id_usuario;
+            if (accion) legacyWhere.accion = { [Op.iLike]: `%${accion}%` };
+            applyActionCategoryFilter(legacyWhere, categoria);
+            applyDateFilter(legacyWhere, 'fecha_creacion', fecha);
+
+            const legacyLogs = await LogAuditoria.findAll({
+                where: legacyWhere,
+                include: [{ model: Usuario, as: 'usuario', attributes: ['id_usuario', 'email'] }],
+                order: [['fecha_creacion', 'DESC']],
+                limit: getLogLimit(limit)
+            });
+
+            let legacyPayloads = legacyLogs.map(legacyAsActionPayload);
+            if (exito === 'true') legacyPayloads = legacyPayloads.filter(log => log.resultado === 'SUCCESS');
+            if (exito === 'false') legacyPayloads = legacyPayloads.filter(log => log.resultado !== 'SUCCESS');
+            if (resultado) legacyPayloads = legacyPayloads.filter(log => log.resultado === resultado);
+
+            return res.json(legacyPayloads);
+        }
+
         res.json(logs.map(actionLogPayload));
     } catch (error) {
         console.error('Error obteniendo logs de acciones:', error);
@@ -180,7 +236,7 @@ router.get('/logs/sesiones', requireAuth, requirePermission('admin:logs:read'), 
                 { model: ClienteAcceso, as: 'cliente', attributes: ['id_cliente', 'dispositivo', 'navegador', 'sistema_operativo'] }
             ],
             order: [['fecha_inicio', 'DESC']],
-            limit: Math.min(parseInt(limit, 10) || 100, 500)
+            limit: getLogLimit(limit)
         });
         res.json(sessions.map(sessionLogPayload));
     } catch (error) {
@@ -348,6 +404,11 @@ router.put('/usuarios/:id', requireAuth, requirePermission('admin:usuarios:write
     const { id } = req.params;
     const { email, password, id_rol, activo } = req.body;
     try {
+        const before = await Usuario.findByPk(id, { attributes: { exclude: ['password'] } });
+        if (!before) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
         const updateData = {};
         if (email) updateData.email = email;
         if (id_rol) updateData.id_rol = id_rol;
@@ -356,19 +417,28 @@ router.put('/usuarios/:id', requireAuth, requirePermission('admin:usuarios:write
             updateData.password = await bcrypt.hash(password, 10);
         }
 
-        const before = await Usuario.findByPk(id, { attributes: { exclude: ['password'] } });
         await Usuario.update(updateData, { where: { id_usuario: id } });
-        const updatedUser = await Usuario.findByPk(id, { include: [{ model: Rol, as: 'rol' }] });
+        const updatedUser = await Usuario.findByPk(id, {
+            include: [{
+                model: Rol,
+                as: 'rol',
+                include: [{ model: Permiso, as: 'permisos', through: { attributes: [] } }]
+            }]
+        });
 
         await auditInfo(req, {
             accion: 'UPDATE',
             seccion: 'USUARIOS',
             descripcion: `Admin actualizo usuario ${id}`,
-            metadata: { before, changes: { ...updateData, password: password ? '[UPDATED]' : undefined } }
+            metadata: {
+                before: before.get({ plain: true }),
+                changes: { ...updateData, password: password ? '[UPDATED]' : undefined }
+            }
         });
 
         res.json(UserDTO(updatedUser));
     } catch (error) {
+        console.error('Error al actualizar usuario:', error);
         res.status(500).json({ error: 'Error al actualizar usuario' });
     }
 });
@@ -453,17 +523,58 @@ router.put('/usuarios/:id/rol', requireAuth, requirePermission('admin:usuarios:w
 // Eliminar usuario
 router.delete('/usuarios/:id', requireAuth, requirePermission('admin:usuarios:delete'), async (req, res) => {
     const { id } = req.params;
+    const userId = parseInt(id, 10);
     try {
-        const deletedUser = await Usuario.findByPk(id, { attributes: ['id_usuario', 'email', 'id_rol'] });
-        await Usuario.destroy({ where: { id_usuario: id } });
+        if (parseInt(req.user.sub, 10) === userId) {
+            return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta desde esta accion.' });
+        }
+
+        const deletedUser = await Usuario.findByPk(userId, { attributes: ['id_usuario', 'email', 'id_rol'] });
+        if (!deletedUser) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const deletedUserPayload = deletedUser.get({ plain: true });
+
+        await sequelize.transaction(async (transaction) => {
+            await LogSesion.destroy({ where: { id_usuario: userId }, transaction });
+            await LogAccion.update(
+                { id_usuario: null, id_cliente: null },
+                { where: { id_usuario: userId }, transaction }
+            );
+            await LogAuditoria.update(
+                { id_usuario: null },
+                { where: { id_usuario: userId }, transaction }
+            );
+            await ClienteAcceso.destroy({ where: { id_usuario: userId }, transaction });
+            await Token.destroy({ where: { id_usuario: userId }, transaction });
+            await Configuracion.destroy({ where: { id_usuario: userId }, transaction });
+            await UsuarioGrupo.destroy({ where: { id_usuario: userId }, transaction });
+            await RelacionRecurso.destroy({
+                where: {
+                    [Op.or]: [
+                        { id_entidad: userId },
+                        { id_recurso: userId, relacion: 'tutor_de' }
+                    ]
+                },
+                transaction
+            });
+            await Documento.update(
+                { id_usuario_creador: null },
+                { where: { id_usuario_creador: userId }, transaction }
+            );
+            await Usuario.destroy({ where: { id_usuario: userId }, transaction });
+        });
+
         await auditDanger(req, {
             accion: 'DELETE',
             seccion: 'USUARIOS',
             descripcion: `Admin elimino usuario ${id}`,
-            metadata: { deletedUser }
+            metadata: { deletedUser: deletedUserPayload }
         });
         res.json({ message: 'Usuario eliminado correctamente' });
     } catch (error) {
+        console.error('Error al eliminar usuario:', error);
         res.status(500).json({ error: 'Error al eliminar usuario' });
     }
 });
@@ -476,9 +587,31 @@ router.get('/grupos', requireAuth, requirePermission('admin:grupos:read'), async
         const grupos = await Grupo.findAll({
             include: [{ model: Usuario, as: 'tutor', attributes: ['email'] }]
         });
-        const gruposDTO = grupos.map(g => GroupDTO(g));
+        const groupIds = grupos.map(g => g.id_grupo);
+        const relaciones = groupIds.length
+            ? await RelacionRecurso.findAll({
+                where: {
+                    id_recurso: groupIds,
+                    relacion: contextualGroupRoles,
+                    activo: true
+                },
+                include: [{ model: Usuario, as: 'entidad_usuario', attributes: ['id_usuario', 'email'] }]
+            })
+            : [];
+
+        const rolesByGroup = {};
+        relaciones.forEach((rel) => {
+            if (!rolesByGroup[rel.id_recurso]) rolesByGroup[rel.id_recurso] = [];
+            rolesByGroup[rel.id_recurso].push(roleRelationPayload(rel));
+        });
+
+        const gruposDTO = grupos.map(g => {
+            g.roles_contextuales = rolesByGroup[g.id_grupo] || [];
+            return GroupDTO(g);
+        });
         res.json(gruposDTO);
     } catch (error) {
+        console.error('Error al obtener grupos:', error);
         res.status(500).json({ error: 'Error al obtener grupos' });
     }
 });
@@ -879,6 +1012,10 @@ router.put('/roles/:id', requireAuth, requirePermission('admin:roles:write'), as
         if (id_tipo_rol) updateData.id_tipo_rol = id_tipo_rol;
 
         const before = await Rol.findByPk(id);
+        if (!before) {
+            return res.status(404).json({ error: 'Rol no encontrado' });
+        }
+
         await Rol.update(updateData, { where: { id_rol: id } });
         const updatedRol = await Rol.findByPk(id, {
             include: [{ model: Permiso, as: 'permisos' }, { model: TipoRol, as: 'tipo' }]
@@ -887,10 +1024,11 @@ router.put('/roles/:id', requireAuth, requirePermission('admin:roles:write'), as
             accion: 'UPDATE',
             seccion: 'ROLES',
             descripcion: `Admin actualizo rol ${id}`,
-            metadata: { before, changes: updateData }
+            metadata: { before: before.get({ plain: true }), changes: updateData }
         });
         res.json(RoleDTO(updatedRol));
     } catch (error) {
+        console.error('Error al actualizar rol:', error);
         res.status(500).json({ error: 'Error al actualizar rol' });
     }
 });

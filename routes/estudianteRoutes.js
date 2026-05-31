@@ -7,6 +7,16 @@ import { GroupDTO } from '../dtos/index.js';
 import { logActionInfo, logActionWarning } from '../utils/actionLogger.js';
 
 const router = express.Router();
+const contextualGroupRoles = ['director_grupo', 'profesor_materia', 'tutor_asistente', 'alumno'];
+const roleRelationPayload = (relation) => ({
+    id: relation.id_relacion,
+    id_usuario: relation.id_entidad,
+    id_grupo: relation.id_recurso,
+    email: relation.entidad_usuario?.email,
+    relacion: relation.relacion,
+    activo: relation.activo,
+    fecha_creacion: relation.fecha_creacion
+});
 
 // Unirse a la clase de un profesor usando código
 router.post('/unirse', requireAuth, requirePermission('CLASES_UNIRSE'), checkPolicy('solo_estudiante_puede_unirse'), checkPolicy('codigo_con_usos_disponibles'), checkPolicy('codigo_no_expirado'), checkPolicy('limite_alumnos_clase'), checkPolicy('clase_debe_estar_activa'), async (req, res) => {
@@ -123,7 +133,29 @@ router.get('/grupos', requireAuth, requirePermission('CLASES_VER'), async (req, 
                 include: [{ model: Usuario, as: 'tutor', attributes: ['email'] }]
             }]
         });
-        const gruposDTO = (usuario.mis_grupos || []).map(g => GroupDTO(g));
+        const grupos = usuario.mis_grupos || [];
+        const groupIds = grupos.map(g => g.id_grupo);
+        const relaciones = groupIds.length
+            ? await RelacionRecurso.findAll({
+                where: {
+                    id_recurso: groupIds,
+                    relacion: contextualGroupRoles,
+                    activo: true
+                },
+                include: [{ model: Usuario, as: 'entidad_usuario', attributes: ['id_usuario', 'email'] }]
+            })
+            : [];
+
+        const rolesByGroup = {};
+        relaciones.forEach((rel) => {
+            if (!rolesByGroup[rel.id_recurso]) rolesByGroup[rel.id_recurso] = [];
+            rolesByGroup[rel.id_recurso].push(roleRelationPayload(rel));
+        });
+
+        const gruposDTO = grupos.map(g => {
+            g.roles_contextuales = rolesByGroup[g.id_grupo] || [];
+            return GroupDTO(g);
+        });
         res.json(gruposDTO);
     } catch (error) {
         console.error(error);
